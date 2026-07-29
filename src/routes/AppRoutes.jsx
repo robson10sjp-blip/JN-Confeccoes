@@ -7,6 +7,7 @@ import DashboardPage from '../pages/DashboardPage'
 import ForgotPasswordPage from '../pages/ForgotPasswordPage'
 import LoginPage from '../pages/LoginPage'
 import RegisterPage from '../pages/RegisterPage'
+import SalesPage from '../pages/SalesPage'
 
 function AppRoutes() {
   const { loading } = useAuth()
@@ -34,6 +35,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ClientsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vendas"
+        element={
+          <ProtectedRoute>
+            <SalesPage />
           </ProtectedRoute>
         }
       />
