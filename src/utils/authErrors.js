@@ -6,6 +6,8 @@ const authErrorDictionary = {
   'auth/email-already-in-use': 'Este e-mail já está cadastrado.',
   'auth/weak-password': 'A senha deve ter pelo menos 6 caracteres.',
   'auth/too-many-requests': 'Muitas tentativas. Tente novamente mais tarde.',
+  'auth/not-configured': 'Serviço de autenticação temporariamente indisponível.',
+  'auth/network-request-failed': 'Falha de conexão. Verifique sua internet e tente novamente.',
 }
 
 export function getAuthErrorMessage(error) {

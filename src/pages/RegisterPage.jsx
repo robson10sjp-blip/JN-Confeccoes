@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import BrandLogo from '../components/BrandLogo'
 import { useAuth } from '../hooks/useAuth'
@@ -6,6 +6,7 @@ import '../styles/auth-pages.css'
 import { getAuthErrorMessage } from '../utils/authErrors'
 
 function RegisterPage() {
+  const redirectTimerRef = useRef(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,6 +14,7 @@ function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
 
   const { user, register } = useAuth()
   const navigate = useNavigate()
@@ -21,24 +23,61 @@ function RegisterPage() {
     return <Navigate to="/dashboard" replace />
   }
 
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current)
+      }
+    }
+  }, [])
+
   const handleSubmit = async (event) => {
     event.preventDefault()
     setErrorMessage('')
+    setSuccessMessage('')
 
-    if (!name || !email || !password || !confirmPassword) {
-      setErrorMessage('Preencha todos os campos para continuar.')
+    const trimmedName = name.trim()
+    const trimmedEmail = email.trim()
+
+    if (!trimmedName) {
+      setErrorMessage('Informe seu nome para continuar.')
+      return
+    }
+
+    if (!trimmedEmail) {
+      setErrorMessage('Informe seu e-mail para continuar.')
+      return
+    }
+
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
+
+    if (!isValidEmail) {
+      setErrorMessage('Digite um e-mail válido.')
+      return
+    }
+
+    if (!password || !confirmPassword) {
+      setErrorMessage('Preencha senha e confirmação para continuar.')
+      return
+    }
+
+    if (password.length < 6) {
+      setErrorMessage('A senha deve ter pelo menos 6 caracteres.')
       return
     }
 
     if (password !== confirmPassword) {
-      setErrorMessage('As senhas não conferem.')
+      setErrorMessage('A confirmação de senha deve ser igual à senha.')
       return
     }
 
     try {
       setSubmitting(true)
-      await register(name, email, password)
-      navigate('/dashboard', { replace: true })
+      await register(trimmedName, trimmedEmail, password)
+      setSuccessMessage('Cadastro realizado com sucesso. Redirecionando para o Dashboard...')
+      redirectTimerRef.current = setTimeout(() => {
+        navigate('/dashboard', { replace: true })
+      }, 900)
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error))
     } finally {
@@ -106,6 +145,7 @@ function RegisterPage() {
           />
 
           {errorMessage && <p className="form-message error">{errorMessage}</p>}
+          {successMessage && <p className="form-message success">{successMessage}</p>}
 
           <button type="submit" className="primary-button" disabled={submitting}>
             {submitting ? 'Criando conta...' : 'Cadastrar'}

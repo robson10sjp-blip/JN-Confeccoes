@@ -6,13 +6,28 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth'
-import { auth } from '../firebase/config'
+import { auth, hasFirebaseConfig } from '../firebase/config'
+
+function createFirebaseConfigError() {
+  return {
+    code: 'auth/not-configured',
+    message: 'Firebase Authentication ainda não foi configurado.',
+  }
+}
 
 export function loginUser(email, password) {
+  if (!hasFirebaseConfig || !auth) {
+    return Promise.reject(createFirebaseConfigError())
+  }
+
   return signInWithEmailAndPassword(auth, email, password)
 }
 
 export async function registerUser(name, email, password) {
+  if (!hasFirebaseConfig || !auth) {
+    throw createFirebaseConfigError()
+  }
+
   const credentials = await createUserWithEmailAndPassword(auth, email, password)
 
   if (name?.trim()) {
@@ -23,13 +38,32 @@ export async function registerUser(name, email, password) {
 }
 
 export function logoutUser() {
+  if (!hasFirebaseConfig || !auth) {
+    return Promise.resolve()
+  }
+
   return signOut(auth)
 }
 
 export function sendResetPassword(email) {
+  if (!hasFirebaseConfig || !auth) {
+    return Promise.reject(createFirebaseConfigError())
+  }
+
   return sendPasswordResetEmail(auth, email)
 }
 
 export function observeAuthState(callback) {
-  return onAuthStateChanged(auth, callback)
+  if (!hasFirebaseConfig || !auth) {
+    callback(null)
+    return () => {}
+  }
+
+  try {
+    return onAuthStateChanged(auth, callback)
+  } catch (error) {
+    console.error('Falha ao observar estado de autenticacao:', error)
+    callback(null)
+    return () => {}
+  }
 }
