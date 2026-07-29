@@ -48,6 +48,16 @@
   background: #f7f7f7;
 }
 
+.dashboard-nav-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dashboard-nav-item:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
 .dashboard-nav-item.is-active {
   border-color: #1f1f1f;
   background: #111111;

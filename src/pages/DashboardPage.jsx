@@ -1,17 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MetricCard from '../components/dashboard/MetricCard'
+import { sidebarMenuItems } from '../constants/sidebarMenu'
 import DashboardLayout from '../layouts/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import '../styles/dashboard-page.css'
-
-const MENU_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'clientes', label: 'Clientes' },
-  { key: 'pedidos', label: 'Pedidos' },
-  { key: 'financeiro', label: 'Financeiro' },
-  { key: 'configuracoes', label: 'Configurações' },
-]
 
 function DashboardPage() {
   const { user, logout } = useAuth()
@@ -28,9 +21,14 @@ function DashboardPage() {
   ]
 
   const handleSelectMenuItem = (itemKey) => {
-    if (itemKey === 'dashboard') {
-      setActiveItem(itemKey)
+    const menuItem = sidebarMenuItems.find((item) => item.key === itemKey)
+
+    if (!menuItem?.enabled || !menuItem.path) {
+      return
     }
+
+    setActiveItem(itemKey)
+    navigate(menuItem.path)
   }
 
   const handleLogout = async () => {
@@ -40,7 +38,7 @@ function DashboardPage() {
 
   return (
     <DashboardLayout
-      sidebarItems={MENU_ITEMS}
+      sidebarItems={sidebarMenuItems}
       activeItem={activeItem}
       onSelectItem={handleSelectMenuItem}
       userName={userName}

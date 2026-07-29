@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import LoadingScreen from '../components/LoadingScreen'
 import ProtectedRoute from '../components/ProtectedRoute'
 import { useAuth } from '../hooks/useAuth'
+import ClientsPage from '../pages/ClientsPage'
 import DashboardPage from '../pages/DashboardPage'
 import ForgotPasswordPage from '../pages/ForgotPasswordPage'
 import LoginPage from '../pages/LoginPage'
@@ -16,6 +17,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -24,6 +26,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/clientes"
+        element={
+          <ProtectedRoute>
+            <ClientsPage />
           </ProtectedRoute>
         }
       />

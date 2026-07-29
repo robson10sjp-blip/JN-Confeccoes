@@ -6,8 +6,8 @@ function SidebarNav({ items, activeKey, onSelect }) {
           key={item.key}
           type="button"
           className={`dashboard-nav-item ${activeKey === item.key ? 'is-active' : ''}`}
+          disabled={!item.enabled}
           onClick={() => onSelect(item.key)}
-          aria-disabled={item.key !== 'dashboard'}
         >
           {item.label}
         </button>
