@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import BrandLogo from '../components/BrandLogo'
 import SidebarNav from '../components/dashboard/SidebarNav'
 import TopBar from '../components/dashboard/TopBar'
 import '../styles/dashboard-layout.css'
@@ -14,7 +15,9 @@ function DashboardLayout({ children, sidebarItems, activeItem, onSelectItem, use
   return (
     <div className="dashboard-layout">
       <aside className={`dashboard-sidebar ${menuOpen ? 'is-open' : ''}`}>
-        <p className="dashboard-sidebar-title">Gestão JN</p>
+        <div className="dashboard-sidebar-header" aria-label="Logo JN Confecções">
+          <BrandLogo className="dashboard-sidebar-logo" />
+        </div>
         <SidebarNav items={sidebarItems} activeKey={activeItem} onSelect={handleSelectItem} />
       </aside>
 
