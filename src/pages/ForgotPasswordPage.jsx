@@ -32,6 +32,7 @@ function ForgotPasswordPage() {
       await resetPassword(email)
       setSuccessMessage('Enviamos o link de recuperação para seu e-mail.')
     } catch (error) {
+      console.error('Erro Firebase Auth na recuperação de senha:', error?.code || 'auth/unknown', error)
       setErrorMessage(getAuthErrorMessage(error))
     } finally {
       setSubmitting(false)

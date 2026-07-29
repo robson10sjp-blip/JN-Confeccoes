@@ -6,11 +6,17 @@ const authErrorDictionary = {
   'auth/email-already-in-use': 'Este e-mail já está cadastrado.',
   'auth/weak-password': 'A senha deve ter pelo menos 6 caracteres.',
   'auth/too-many-requests': 'Muitas tentativas. Tente novamente mais tarde.',
-  'auth/not-configured': 'Serviço de autenticação temporariamente indisponível.',
   'auth/network-request-failed': 'Falha de conexão. Verifique sua internet e tente novamente.',
 }
 
 export function getAuthErrorMessage(error) {
-  const code = error?.code || ''
-  return authErrorDictionary[code] || 'Não foi possível concluir a ação. Tente novamente.'
+  const normalizedCode = error?.code || error?.message || 'auth/unknown'
+  const code = String(normalizedCode).replace('Firebase: Error ', '').replace(/[().]/g, '')
+  const mappedMessage = authErrorDictionary[code]
+
+  if (mappedMessage) {
+    return `${mappedMessage} (${code})`
+  }
+
+  return `Erro de autenticação: ${code}`
 }

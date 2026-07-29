@@ -79,6 +79,7 @@ function RegisterPage() {
         navigate('/dashboard', { replace: true })
       }, 900)
     } catch (error) {
+      console.error('Erro Firebase Auth no cadastro:', error?.code || 'auth/unknown', error)
       setErrorMessage(getAuthErrorMessage(error))
     } finally {
       setSubmitting(false)

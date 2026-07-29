@@ -35,6 +35,7 @@ function LoginPage() {
       await login(email, password)
       navigate('/dashboard', { replace: true })
     } catch (error) {
+      console.error('Erro Firebase Auth no login:', error?.code || 'auth/unknown', error)
       setErrorMessage(getAuthErrorMessage(error))
     } finally {
       setSubmitting(false)

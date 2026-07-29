@@ -6,12 +6,12 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth'
-import { auth, hasFirebaseConfig } from '../firebase/config'
+import { auth, hasFirebaseConfig, missingFirebaseEnvKeys } from '../firebase/config'
 
 function createFirebaseConfigError() {
   return {
     code: 'auth/not-configured',
-    message: 'Firebase Authentication ainda não foi configurado.',
+    message: `Firebase Authentication não configurado. Variáveis ausentes: ${missingFirebaseEnvKeys.join(', ')}`,
   }
 }
 

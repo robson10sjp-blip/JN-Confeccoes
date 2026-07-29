@@ -21,7 +21,8 @@ const requiredFirebaseEnvKeys = [
   'appId',
 ]
 
-const hasFirebaseConfig = requiredFirebaseEnvKeys.every((key) => Boolean(firebaseConfig[key]))
+const missingFirebaseEnvKeys = requiredFirebaseEnvKeys.filter((key) => !firebaseConfig[key])
+const hasFirebaseConfig = missingFirebaseEnvKeys.length === 0
 
 let app = null
 let auth = null
@@ -35,6 +36,8 @@ if (hasFirebaseConfig) {
   } catch (error) {
     console.error('Falha ao inicializar Firebase:', error)
   }
+} else {
+  console.error('Configuração do Firebase incompleta. Variáveis ausentes:', missingFirebaseEnvKeys)
 }
 
-export { app, auth, db, hasFirebaseConfig }
+export { app, auth, db, hasFirebaseConfig, missingFirebaseEnvKeys }
