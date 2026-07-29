@@ -1,2 +1,2 @@
-# JN-Confec-oes
-sistema JN confecçoes
+# JN-Confeccoes
+sistema JN confeccoes
