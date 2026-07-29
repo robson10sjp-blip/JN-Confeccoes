@@ -1,0 +1,159 @@
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  padding: 28px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.07);
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.auth-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.auth-header p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form label {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafafa;
+  transition: border-color 0.2s ease;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: #ffffff;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 84px;
+}
+
+.text-button {
+  border: none;
+  background: transparent;
+  color: #333333;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.85rem;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.primary-button,
+.secondary-button {
+  margin-top: 8px;
+  border-radius: 10px;
+  padding: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: 1px solid #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #282828;
+  border-color: #282828;
+}
+
+.secondary-button {
+  border: 1px solid #1d1d1d;
+  background: #ffffff;
+  color: #1d1d1d;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #f1f1f1;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.text-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.form-message {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+}
+
+.form-message.error {
+  color: var(--danger);
+}
+
+.form-message.success {
+  color: var(--success);
+}
+
+.auth-footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-footer a {
+  font-size: 0.9rem;
+  color: #1d1d1d;
+  text-decoration: underline;
+}
+
+.auth-footer-center {
+  justify-content: center;
+}
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 22px;
+    border-radius: 14px;
+  }
+
+  .auth-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .auth-footer-center {
+    align-items: center;
+  }
+}

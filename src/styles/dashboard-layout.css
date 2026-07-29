@@ -1,0 +1,29 @@
+.dashboard-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.dashboard-layout-header {
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  padding: 14px 24px;
+}
+
+.dashboard-layout-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.dashboard-layout-main {
+  padding: 24px;
+}
+
+.dashboard-layout-footer {
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 10px 24px;
+}
