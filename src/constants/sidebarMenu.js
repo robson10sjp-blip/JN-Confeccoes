@@ -4,5 +4,4 @@ export const sidebarMenuItems = [
   { key: 'produtos', label: 'Produtos', path: '/produtos', enabled: true },
   { key: 'vendas', label: 'Vendas', path: '/vendas', enabled: true },
   { key: 'financeiro', label: 'Financeiro', path: '/financeiro', enabled: true },
-  { key: 'configuracoes', label: 'Configurações', path: '', enabled: false },
 ]

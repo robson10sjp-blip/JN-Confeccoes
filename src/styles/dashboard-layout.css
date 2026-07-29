@@ -29,7 +29,7 @@
 
 .dashboard-sidebar-nav {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dashboard-nav-item {
