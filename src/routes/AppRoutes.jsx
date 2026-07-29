@@ -4,6 +4,7 @@ import ProtectedRoute from '../components/ProtectedRoute'
 import { useAuth } from '../hooks/useAuth'
 import ClientsPage from '../pages/ClientsPage'
 import DashboardPage from '../pages/DashboardPage'
+import FinancialPage from '../pages/FinancialPage'
 import ForgotPasswordPage from '../pages/ForgotPasswordPage'
 import LoginPage from '../pages/LoginPage'
 import ProductsPage from '../pages/ProductsPage'
@@ -52,6 +53,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SalesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/financeiro"
+        element={
+          <ProtectedRoute>
+            <FinancialPage />
           </ProtectedRoute>
         }
       />
