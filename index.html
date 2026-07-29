@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JN Confecções</title>
+    <script>
+      ;(function (location) {
+        if (location.search[1] !== '/') {
+          return
+        }
+
+        const decoded = location.search
+          .slice(1)
+          .split('&')
+          .map((entry) => entry.replace(/~and~/g, '&'))
+          .join('?')
+
+        window.history.replaceState(null, '', location.pathname.slice(0, -1) + decoded + location.hash)
+      })(window.location)
+    </script>
+    <script type="module" crossorigin src="/JN-Confeccoes/assets/index-DMtNXzMI.js"></script>
+    <link rel="stylesheet" crossorigin href="/JN-Confeccoes/assets/index-DgSJyUzg.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
