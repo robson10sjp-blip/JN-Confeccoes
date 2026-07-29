@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import BrandLogo from '../components/BrandLogo'
 import { useAuth } from '../hooks/useAuth'
-import '../styles/auth-pages.css'
+import '../styles/login-premium.css'
 import { getAuthErrorMessage } from '../utils/authErrors'
 
 function LoginPage() {
@@ -42,27 +41,43 @@ function LoginPage() {
   }
 
   return (
-    <main className="auth-page">
-      <section className="auth-card" aria-labelledby="login-title">
-        <header className="auth-header">
-          <BrandLogo />
-          <h1 id="login-title">Acessar conta</h1>
-          <p>Entre para continuar no sistema.</p>
+    <main className="login-premium-page">
+      <section className="login-premium-card" aria-labelledby="login-title">
+        <header className="login-premium-header">
+          <div className="login-premium-logo" aria-label="Espaco para logo JN Confeccoes">
+            JN
+          </div>
+          <h1 id="login-title">Bem-vindo</h1>
+          <p>Acesse sua conta para continuar.</p>
         </header>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
+        <form className="login-premium-form" onSubmit={handleSubmit}>
           <label htmlFor="email">E-mail</label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            placeholder="seuemail@exemplo.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
+          <div className="login-input-wrapper">
+            <span className="login-input-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6H20V18H4V6Z" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M4 8L12 13L20 8" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </span>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="seuemail@exemplo.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
 
           <label htmlFor="password">Senha</label>
-          <div className="password-field">
+          <div className="login-input-wrapper password-field-premium">
+            <span className="login-input-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M8 11V8.5C8 6.57 9.57 5 11.5 5H12.5C14.43 5 16 6.57 16 8.5V11" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </span>
             <input
               id="password"
               type={showPassword ? 'text' : 'password'}
@@ -73,23 +88,23 @@ function LoginPage() {
             />
             <button
               type="button"
-              className="text-button"
+              className="login-password-toggle"
               onClick={() => setShowPassword((previous) => !previous)}
             >
               {showPassword ? 'Ocultar' : 'Mostrar'}
             </button>
           </div>
 
-          {errorMessage && <p className="form-message error">{errorMessage}</p>}
+          {errorMessage && <p className="login-form-message error">{errorMessage}</p>}
 
-          <button type="submit" className="primary-button" disabled={submitting}>
+          <button type="submit" className="login-submit-button" disabled={submitting}>
             {submitting ? 'Entrando...' : 'Entrar'}
           </button>
         </form>
 
-        <footer className="auth-footer">
-          <Link to="/register">Criar conta</Link>
+        <footer className="login-premium-footer">
           <Link to="/forgot-password">Esqueci minha senha</Link>
+          <Link to="/register">Criar conta</Link>
         </footer>
       </section>
     </main>
