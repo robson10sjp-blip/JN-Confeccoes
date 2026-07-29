@@ -5,6 +5,7 @@ import { sidebarMenuItems } from '../constants/sidebarMenu'
 import DashboardLayout from '../layouts/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import { countProductsByUser } from '../services/productsService'
+import { getSalesSummaryByUser } from '../services/salesService'
 import '../styles/dashboard-page.css'
 
 function DashboardPage() {
@@ -12,6 +13,11 @@ function DashboardPage() {
   const navigate = useNavigate()
   const [activeItem, setActiveItem] = useState('dashboard')
   const [productsCount, setProductsCount] = useState(0)
+  const [salesSummary, setSalesSummary] = useState({
+    totalSales: 0,
+    totalSoldValue: 0,
+    totalProductsSold: 0,
+  })
 
   const userName = user?.displayName?.trim() || user?.email?.split('@')[0] || 'Usuário'
 
@@ -34,14 +40,48 @@ function DashboardPage() {
     loadProductsCount()
   }, [loadProductsCount])
 
+  const loadSalesSummary = useCallback(async () => {
+    if (!user?.uid) {
+      setSalesSummary({
+        totalSales: 0,
+        totalSoldValue: 0,
+        totalProductsSold: 0,
+      })
+      return
+    }
+
+    try {
+      const summary = await getSalesSummaryByUser(user.uid)
+      setSalesSummary(summary)
+    } catch (error) {
+      console.error('Erro ao carregar resumo de vendas:', error)
+      setSalesSummary({
+        totalSales: 0,
+        totalSoldValue: 0,
+        totalProductsSold: 0,
+      })
+    }
+  }, [user?.uid])
+
+  useEffect(() => {
+    loadSalesSummary()
+  }, [loadSalesSummary])
+
   const metrics = useMemo(
     () => [
-      { key: 'clientes', title: 'Clientes', value: '0' },
-      { key: 'produtos', title: 'Produtos', value: String(productsCount) },
-      { key: 'producao', title: 'Em produção', value: '0' },
-      { key: 'faturamento', title: 'Faturamento', value: 'R$ 0,00' },
+      { key: 'vendas', title: 'Total de vendas', value: String(salesSummary.totalSales) },
+      {
+        key: 'valorVendido',
+        title: 'Valor vendido',
+        value: new Intl.NumberFormat('pt-BR', {
+          style: 'currency',
+          currency: 'BRL',
+        }).format(salesSummary.totalSoldValue),
+      },
+      { key: 'produtosVendidos', title: 'Produtos vendidos', value: String(salesSummary.totalProductsSold) },
+      { key: 'produtos', title: 'Produtos cadastrados', value: String(productsCount) },
     ],
-    [productsCount],
+    [productsCount, salesSummary.totalProductsSold, salesSummary.totalSales, salesSummary.totalSoldValue],
   )
 
   const handleSelectMenuItem = (itemKey) => {
