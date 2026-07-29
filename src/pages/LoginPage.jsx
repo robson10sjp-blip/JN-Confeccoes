@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import '../styles/login-premium.css'
 import { getAuthErrorMessage } from '../utils/authErrors'
+import logo from '../assets/logo.png'
 
 function LoginPage() {
   const [email, setEmail] = useState('')
@@ -44,8 +45,8 @@ function LoginPage() {
     <main className="login-premium-page">
       <section className="login-premium-card" aria-labelledby="login-title">
         <header className="login-premium-header">
-          <div className="login-premium-logo" aria-label="Espaco para logo JN Confeccoes">
-            JN
+          <div className="logo-container">
+            <img src={logo} alt="JN Confecções" className="login-logo" />
           </div>
           <h1 id="login-title">Bem-vindo</h1>
           <p>Acesse sua conta para continuar.</p>

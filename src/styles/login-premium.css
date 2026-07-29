@@ -20,22 +20,24 @@
 
 .login-premium-header {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
-.login-premium-logo {
-  width: 122px;
-  height: 122px;
-  margin: 0 auto 18px;
-  border-radius: 30px;
-  border: 1px solid #d8d8d8;
-  display: grid;
-  place-items: center;
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: #171717;
-  background: linear-gradient(145deg, #ffffff 0%, #f2f2f2 100%);
+.logo-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 24px;
+  background: transparent;
+}
+
+.login-logo {
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  display: block;
+  object-fit: contain;
+  background: transparent;
 }
 
 .login-premium-header h1 {
@@ -193,7 +195,7 @@
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.16);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .login-premium-page {
     padding: 16px;
   }
@@ -203,11 +205,8 @@
     padding: 26px 20px;
   }
 
-  .login-premium-logo {
-    width: 102px;
-    height: 102px;
-    border-radius: 24px;
-    font-size: 1.75rem;
+  .login-logo {
+    width: 170px;
   }
 
   .login-premium-header h1 {
