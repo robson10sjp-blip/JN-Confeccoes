@@ -13,6 +13,7 @@ import {
   loadFinancialModuleData,
   registerFinancialPaymentByUser,
 } from '../services/financialService'
+import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import '../styles/financial-page.css'
 
 const QUICK_FILTERS = [
@@ -205,7 +206,7 @@ function FinancialPage() {
       setSalesSummary(response.salesSummary)
     } catch (error) {
       console.error('Erro ao carregar financeiro:', error)
-      setErrorMessage('Não foi possível carregar os dados do financeiro. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível carregar os dados do financeiro'))
     } finally {
       setLoadingData(false)
     }
@@ -318,12 +319,12 @@ function FinancialPage() {
 
       await registerFinancialPaymentByUser(user.uid, selectedReceivable, receiveForm)
 
-      setSuccessMessage('Recebimento registrado com sucesso.')
+      setSuccessMessage('Salvo com sucesso.')
       await loadData()
       closeModal()
     } catch (error) {
       console.error('Erro ao registrar recebimento financeiro:', error)
-      setErrorMessage(error?.message || 'Não foi possível registrar o recebimento.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível registrar o recebimento'))
     } finally {
       setSubmittingReceive(false)
     }

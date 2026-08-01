@@ -2,11 +2,15 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  Timestamp,
+  writeBatch,
   where,
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
@@ -14,21 +18,135 @@ import { db } from '../firebase/config'
 const PAYMENT_CASH = 'À Vista'
 const PAYMENT_INSTALLMENTS = 'Prazo'
 
+function ensureFirestoreReady() {
+  if (!db) {
+    throw Object.assign(new Error('Firestore não inicializado.'), { code: 'firestore/not-configured' })
+  }
+}
+
+function ensureUser(uid) {
+  if (!uid) {
+    throw Object.assign(new Error('Usuário não autenticado.'), { code: 'auth/not-authenticated' })
+  }
+}
+
 function getSalesCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   return collection(db, 'users', uid, 'sales')
 }
 
 function getProductsCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   return collection(db, 'users', uid, 'products')
 }
 
 function getReceivablesCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   return collection(db, 'users', uid, 'financeiroReceber')
+}
+
+function getPaymentsHistoryCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
+  return collection(db, 'users', uid, 'financeiroRecebimentos')
 }
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value)
   return Number.isNaN(parsed) ? fallback : parsed
+}
+
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function assertFiniteNumber(field, value) {
+  if (!isFiniteNumber(value)) {
+    console.error('[sales/validation] Campo numerico invalido:', {
+      field,
+      value,
+      type: typeof value,
+    })
+    throw Object.assign(new Error(`Campo numerico invalido: ${field}`), {
+      code: 'sales/invalid-argument',
+      field,
+    })
+  }
+}
+
+function assertValidDateInput(paymentDate) {
+  if (!paymentDate || typeof paymentDate !== 'string') {
+    console.error('[sales/validation] Data de recebimento ausente ou invalida:', {
+      field: 'paymentDate',
+      paymentDate,
+    })
+    throw Object.assign(new Error('Data de recebimento é obrigatória.'), {
+      code: 'sales/invalid-payment-date',
+      field: 'paymentDate',
+    })
+  }
+
+  const isIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(paymentDate)
+
+  if (!isIsoDate) {
+    console.error('[sales/validation] Formato de data invalido:', {
+      field: 'paymentDate',
+      paymentDate,
+    })
+    throw Object.assign(new Error('Data de recebimento inválida.'), {
+      code: 'sales/invalid-payment-date',
+      field: 'paymentDate',
+    })
+  }
+
+  const date = new Date(`${paymentDate}T12:00:00`)
+
+  if (Number.isNaN(date.getTime())) {
+    console.error('[sales/validation] Data de recebimento nao pode ser convertida:', {
+      field: 'paymentDate',
+      paymentDate,
+    })
+    throw Object.assign(new Error('Data de recebimento inválida.'), {
+      code: 'sales/invalid-payment-date',
+      field: 'paymentDate',
+    })
+  }
+
+  return date
+}
+
+function assertNoUndefinedFields(fieldMap, context) {
+  for (const [field, value] of Object.entries(fieldMap)) {
+    if (value === undefined) {
+      console.error('[sales/validation] Campo undefined detectado antes de salvar:', {
+        context,
+        field,
+        value,
+      })
+
+      throw Object.assign(new Error(`Campo obrigatório ausente: ${field}`), {
+        code: 'sales/invalid-argument',
+        field,
+      })
+    }
+  }
+}
+
+function assertDocumentReference(ref, context) {
+  if (!ref || typeof ref.path !== 'string' || !ref.path.trim()) {
+    console.error('[sales/validation] Referencia de documento invalida:', {
+      context,
+      ref,
+    })
+
+    throw Object.assign(new Error(`Referencia de documento invalida: ${context}`), {
+      code: 'sales/invalid-document-reference',
+      context,
+    })
+  }
 }
 
 function normalizeItem(item) {
@@ -154,8 +272,8 @@ function buildReceivablesFromSale(uid, saleId, saleData, paidAmount = 0) {
 }
 
 async function deleteReceivablesBySaleId(uid, saleId, transaction) {
-  const receivablesQuery = query(getReceivablesCollectionRef(uid), where('saleId', '==', saleId))
-  const receivablesSnapshot = await transaction.get(receivablesQuery)
+  const saleReceivablesQuery = query(getReceivablesCollectionRef(uid), where('saleId', '==', saleId))
+  const receivablesSnapshot = await transaction.get(saleReceivablesQuery)
 
   receivablesSnapshot.forEach((entryDoc) => {
     transaction.delete(entryDoc.ref)
@@ -172,7 +290,64 @@ export async function listSalesByUser(uid) {
   }))
 }
 
+export function subscribeSalesByUser(uid, onData, onError) {
+  const salesQuery = query(getSalesCollectionRef(uid), orderBy('saleDate', 'desc'))
+
+  return onSnapshot(
+    salesQuery,
+    (snapshot) => {
+      const sales = snapshot.docs.map((saleDoc) => ({
+        id: saleDoc.id,
+        ...saleDoc.data(),
+      }))
+
+      onData(sales)
+    },
+    onError,
+  )
+}
+
+export async function getSaleReceiptDataByUser(uid, saleId) {
+  ensureFirestoreReady()
+  ensureUser(uid)
+
+  if (!saleId) {
+    throw Object.assign(new Error('Venda inválida para recibo.'), { code: 'sales/invalid-sale-id' })
+  }
+
+  const saleRef = doc(getSalesCollectionRef(uid), saleId)
+  const saleSnapshot = await getDoc(saleRef)
+
+  if (!saleSnapshot.exists()) {
+    throw Object.assign(new Error('Venda não encontrada para gerar recibo.'), { code: 'sales/not-found' })
+  }
+
+  const paymentsQuery = query(getPaymentsHistoryCollectionRef(uid), where('saleId', '==', saleId))
+  const paymentsSnapshot = await getDocs(paymentsQuery)
+
+  const payments = paymentsSnapshot.docs
+    .map((paymentDoc) => ({
+      id: paymentDoc.id,
+      ...paymentDoc.data(),
+    }))
+    .sort((a, b) => {
+      const dateA = String(a.paymentDate || '')
+      const dateB = String(b.paymentDate || '')
+      return dateA > dateB ? -1 : dateA < dateB ? 1 : 0
+    })
+
+  return {
+    sale: {
+      id: saleSnapshot.id,
+      ...saleSnapshot.data(),
+    },
+    payments,
+  }
+}
+
 export async function createSaleByUser(uid, payload) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   const saleData = normalizeSalePayload(payload)
   validateSalePayload(saleData)
 
@@ -211,14 +386,34 @@ export async function createSaleByUser(uid, payload) {
     }
 
     const paidAmount = saleData.paymentMethod === PAYMENT_CASH ? saleData.totalAmount : 0
+    const remainingAmount = Math.max(0, saleData.totalAmount - paidAmount)
 
-    transaction.set(saleRef, {
+    assertFiniteNumber('paidAmount', paidAmount)
+    assertFiniteNumber('remainingAmount', remainingAmount)
+
+    const saleDocPayload = {
       ...saleData,
       paidAmount,
+      amountPaid: paidAmount,
+      remainingAmount,
       status: deriveStatus(saleData.totalAmount, paidAmount),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    })
+    }
+
+    assertNoUndefinedFields(
+      {
+        paidAmount: saleDocPayload.paidAmount,
+        amountPaid: saleDocPayload.amountPaid,
+        remainingAmount: saleDocPayload.remainingAmount,
+        status: saleDocPayload.status,
+        createdAt: saleDocPayload.createdAt,
+        updatedAt: saleDocPayload.updatedAt,
+      },
+      'createSaleByUser:saleDocPayload',
+    )
+
+    transaction.set(saleRef, saleDocPayload)
 
     const receivables = buildReceivablesFromSale(uid, saleRef.id, saleData, paidAmount)
 
@@ -231,10 +426,13 @@ export async function createSaleByUser(uid, payload) {
 }
 
 export async function updateSaleByUser(uid, saleId, payload) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   const saleData = normalizeSalePayload(payload)
   validateSalePayload(saleData)
 
   const saleRef = doc(getSalesCollectionRef(uid), saleId)
+  assertDocumentReference(saleRef, 'registerSalePaymentByUser:saleRef')
 
   await runTransaction(db, async (transaction) => {
     const saleSnapshot = await transaction.get(saleRef)
@@ -294,13 +492,32 @@ export async function updateSaleByUser(uid, saleId, payload) {
     const paidAmount = saleData.paymentMethod === PAYMENT_CASH
       ? saleData.totalAmount
       : Math.min(previousPaidAmount, saleData.totalAmount)
+    const remainingAmount = Math.max(0, saleData.totalAmount - paidAmount)
 
-    transaction.update(saleRef, {
+    assertFiniteNumber('paidAmount', paidAmount)
+    assertFiniteNumber('remainingAmount', remainingAmount)
+
+    const saleUpdatePayload = {
       ...saleData,
       paidAmount,
+      amountPaid: paidAmount,
+      remainingAmount,
       status: deriveStatus(saleData.totalAmount, paidAmount),
       updatedAt: serverTimestamp(),
-    })
+    }
+
+    assertNoUndefinedFields(
+      {
+        paidAmount: saleUpdatePayload.paidAmount,
+        amountPaid: saleUpdatePayload.amountPaid,
+        remainingAmount: saleUpdatePayload.remainingAmount,
+        status: saleUpdatePayload.status,
+        updatedAt: saleUpdatePayload.updatedAt,
+      },
+      'updateSaleByUser:saleUpdatePayload',
+    )
+
+    transaction.update(saleRef, saleUpdatePayload)
 
     await deleteReceivablesBySaleId(uid, saleId, transaction)
 
@@ -313,6 +530,8 @@ export async function updateSaleByUser(uid, saleId, payload) {
 }
 
 export async function deleteSaleByUser(uid, saleId) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   const saleRef = doc(getSalesCollectionRef(uid), saleId)
 
   await runTransaction(db, async (transaction) => {
@@ -349,7 +568,23 @@ export async function deleteSaleByUser(uid, saleId) {
 }
 
 export async function registerSalePaymentByUser(uid, saleId, paymentAmount, paymentDate) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   const amount = toNumber(paymentAmount)
+  const paymentDateAsDate = assertValidDateInput(paymentDate)
+  const paymentDateTimestamp = Timestamp.fromDate(paymentDateAsDate)
+
+  assertFiniteNumber('paymentAmount', amount)
+  assertNoUndefinedFields(
+    {
+      uid,
+      saleId,
+      paymentAmount,
+      paymentDate,
+      paymentDateTimestamp,
+    },
+    'registerSalePaymentByUser:input',
+  )
 
   if (amount <= 0) {
     throw Object.assign(new Error('Informe um valor de recebimento maior que zero.'), {
@@ -358,8 +593,9 @@ export async function registerSalePaymentByUser(uid, saleId, paymentAmount, paym
   }
 
   const saleRef = doc(getSalesCollectionRef(uid), saleId)
+  assertDocumentReference(saleRef, 'registerSalePaymentByUser:saleRef')
 
-  await runTransaction(db, async (transaction) => {
+  const salePaymentContext = await runTransaction(db, async (transaction) => {
     const saleSnapshot = await transaction.get(saleRef)
 
     if (!saleSnapshot.exists()) {
@@ -368,48 +604,146 @@ export async function registerSalePaymentByUser(uid, saleId, paymentAmount, paym
 
     const saleData = saleSnapshot.data()
     const totalAmount = toNumber(saleData.totalAmount)
-    const currentPaid = toNumber(saleData.paidAmount)
-    const nextPaid = Math.min(totalAmount, currentPaid + amount)
-
-    transaction.update(saleRef, {
-      paidAmount: nextPaid,
-      status: deriveStatus(totalAmount, nextPaid),
-      updatedAt: serverTimestamp(),
-    })
-
-    if (saleData.paymentMethod !== PAYMENT_INSTALLMENTS) {
-      return
-    }
-
-    const receivablesQuery = query(
-      getReceivablesCollectionRef(uid),
-      where('saleId', '==', saleId),
-      orderBy('installment', 'asc'),
+    const currentPaid = toNumber(
+      saleData.paidAmount ?? saleData.amountPaid,
+      0,
     )
 
-    const receivablesSnapshot = await transaction.get(receivablesQuery)
+    assertFiniteNumber('sale.totalAmount', totalAmount)
+    assertFiniteNumber('sale.paidAmount', currentPaid)
 
-    let remainingPaid = nextPaid
+    const safeCurrentPaid = Math.max(0, Math.min(totalAmount, currentPaid))
+    const remainingBeforePayment = Math.max(0, totalAmount - safeCurrentPaid)
 
-    receivablesSnapshot.forEach((entryDoc) => {
-      const entryData = entryDoc.data()
-      const installmentAmount = toNumber(entryData.amount)
-      const receivedAmount = Math.max(0, Math.min(remainingPaid, installmentAmount))
-      remainingPaid = Math.max(0, remainingPaid - installmentAmount)
-
-      const status = receivedAmount >= installmentAmount ? 'Pago' : receivedAmount > 0 ? 'Parcial' : 'Pendente'
-
-      transaction.update(entryDoc.ref, {
-        receivedAmount,
-        status,
-        lastPaymentDate: paymentDate || '',
-        updatedAt: serverTimestamp(),
+    if (amount > remainingBeforePayment) {
+      console.error('[sales/validation] Valor recebido acima do saldo.', {
+        field: 'paymentAmount',
+        amount,
+        remainingBeforePayment,
+        saleId,
       })
-    })
+      throw Object.assign(new Error('O valor informado ultrapassa o saldo da venda.'), {
+        code: 'sales/payment-over-balance',
+        field: 'paymentAmount',
+      })
+    }
+
+    const nextPaid = safeCurrentPaid + amount
+    const remainingAmount = Math.max(0, totalAmount - nextPaid)
+    const nextStatus = deriveStatus(totalAmount, nextPaid)
+    const existingPaymentsHistory = Array.isArray(saleData.payments) ? saleData.payments : []
+    const nextPaymentsHistory = [
+      ...existingPaymentsHistory,
+      {
+        amount,
+        paymentDate,
+      },
+    ]
+
+    assertFiniteNumber('nextPaid', nextPaid)
+    assertFiniteNumber('remainingAmount', remainingAmount)
+
+    const salePaymentUpdatePayload = {
+      paidAmount: nextPaid,
+      amountPaid: nextPaid,
+      remainingAmount,
+      status: nextStatus,
+      paymentDate: paymentDateTimestamp,
+      lastPaymentDate: paymentDate,
+      payments: nextPaymentsHistory,
+      updatedAt: serverTimestamp(),
+    }
+
+    assertNoUndefinedFields(
+      {
+        paidAmount: salePaymentUpdatePayload.paidAmount,
+        amountPaid: salePaymentUpdatePayload.amountPaid,
+        remainingAmount: salePaymentUpdatePayload.remainingAmount,
+        status: salePaymentUpdatePayload.status,
+        paymentDate: salePaymentUpdatePayload.paymentDate,
+        lastPaymentDate: salePaymentUpdatePayload.lastPaymentDate,
+        payments: salePaymentUpdatePayload.payments,
+        updatedAt: salePaymentUpdatePayload.updatedAt,
+      },
+      'registerSalePaymentByUser:salePaymentUpdatePayload',
+    )
+
+    transaction.update(saleRef, salePaymentUpdatePayload)
+
+    return {
+      paymentMethod: saleData.paymentMethod,
+      nextPaid,
+    }
+  }).catch((error) => {
+    if (error?.code === 'invalid-argument' || error?.code === 'sales/invalid-argument') {
+      console.error('[sales/payment] invalid-argument durante recebimento', {
+        uid,
+        saleId,
+        paymentAmount,
+        amountParsed: amount,
+        paymentDate,
+        paymentDateTimestamp,
+        code: error?.code,
+        message: error?.message,
+        field: error?.field,
+      })
+    }
+
+    throw error
   })
+
+  if (salePaymentContext.paymentMethod !== PAYMENT_INSTALLMENTS) {
+    return
+  }
+
+  const receivablesQuery = query(
+    getReceivablesCollectionRef(uid),
+    where('saleId', '==', saleId),
+  )
+
+  const receivablesSnapshot = await getDocs(receivablesQuery)
+  const receivablesBatch = writeBatch(db)
+  let remainingPaid = salePaymentContext.nextPaid
+
+  const receivableDocs = [...receivablesSnapshot.docs].sort((a, b) => {
+    const installmentA = toNumber(a.data()?.installment)
+    const installmentB = toNumber(b.data()?.installment)
+    return installmentA - installmentB
+  })
+
+  receivableDocs.forEach((entryDoc) => {
+    const entryData = entryDoc.data()
+    const installmentAmount = toNumber(entryData.amount)
+    const receivedAmount = Math.max(0, Math.min(remainingPaid, installmentAmount))
+    remainingPaid = Math.max(0, remainingPaid - installmentAmount)
+
+    const status = receivedAmount >= installmentAmount ? 'Pago' : receivedAmount > 0 ? 'Parcial' : 'Pendente'
+
+    const receivableUpdatePayload = {
+      receivedAmount,
+      status,
+      paymentDate: paymentDateTimestamp,
+      updatedAt: serverTimestamp(),
+    }
+
+    assertNoUndefinedFields(
+      {
+        receivedAmount: receivableUpdatePayload.receivedAmount,
+        status: receivableUpdatePayload.status,
+        paymentDate: receivableUpdatePayload.paymentDate,
+        updatedAt: receivableUpdatePayload.updatedAt,
+      },
+      'registerSalePaymentByUser:receivableUpdatePayload',
+    )
+
+    receivablesBatch.update(entryDoc.ref, receivableUpdatePayload)
+  })
+
+  await receivablesBatch.commit()
 }
 
 export async function getSalesSummaryByUser(uid) {
+  ensureUser(uid)
   const snapshot = await getDocs(getSalesCollectionRef(uid))
 
   return snapshot.docs.reduce(

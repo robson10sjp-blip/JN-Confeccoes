@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -11,7 +12,21 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
 
+function ensureFirestoreReady() {
+  if (!db) {
+    throw Object.assign(new Error('Firestore não inicializado.'), { code: 'firestore/not-configured' })
+  }
+}
+
+function ensureUser(uid) {
+  if (!uid) {
+    throw Object.assign(new Error('Usuário não autenticado.'), { code: 'auth/not-authenticated' })
+  }
+}
+
 function getProductsCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   return collection(db, 'users', uid, 'products')
 }
 
@@ -31,6 +46,7 @@ export async function countProductsByUser(uid) {
 }
 
 export async function createProductByUser(uid, payload) {
+  ensureUser(uid)
   const now = serverTimestamp()
 
   await addDoc(getProductsCollectionRef(uid), {
@@ -41,6 +57,8 @@ export async function createProductByUser(uid, payload) {
 }
 
 export async function updateProductByUser(uid, productId, payload) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   const productRef = doc(db, 'users', uid, 'products', productId)
 
   await updateDoc(productRef, {
@@ -50,6 +68,25 @@ export async function updateProductByUser(uid, productId, payload) {
 }
 
 export async function deleteProductByUser(uid, productId) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   const productRef = doc(db, 'users', uid, 'products', productId)
   await deleteDoc(productRef)
+}
+
+export function subscribeProductsByUser(uid, onData, onError) {
+  const productsQuery = query(getProductsCollectionRef(uid), orderBy('createdAt', 'desc'))
+
+  return onSnapshot(
+    productsQuery,
+    (snapshot) => {
+      const products = snapshot.docs.map((productDoc) => ({
+        id: productDoc.id,
+        ...productDoc.data(),
+      }))
+
+      onData(products)
+    },
+    onError,
+  )
 }

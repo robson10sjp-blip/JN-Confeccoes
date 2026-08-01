@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Documento raiz do usuario autenticado.
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Clientes: users/{uid}/clients/{clientId}
+    match /users/{userId}/clients/{clientId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Produtos: users/{uid}/products/{productId}
+    match /users/{userId}/products/{productId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Vendas: users/{uid}/sales/{saleId}
+    match /users/{userId}/sales/{saleId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Contas a receber: users/{uid}/financeiroReceber/{receivableId}
+    match /users/{userId}/financeiroReceber/{receivableId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Historico de recebimentos: users/{uid}/financeiroRecebimentos/{paymentId}
+    match /users/{userId}/financeiroRecebimentos/{paymentId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Caso adicione recibos dedicados: users/{uid}/receipts/{receiptId}
+    match /users/{userId}/receipts/{receiptId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Caso adicione pagamentos dedicados: users/{uid}/payments/{paymentId}
+    match /users/{userId}/payments/{paymentId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Bloqueia qualquer caminho nao mapeado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

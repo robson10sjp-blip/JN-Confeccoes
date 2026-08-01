@@ -1,13 +1,29 @@
-import { addDoc, collection, getDocs, orderBy, query, serverTimestamp } from 'firebase/firestore'
+import { addDoc, collection, getDocs, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { listClientsByUser } from './clientsService'
 import { getSalesSummaryByUser, listSalesByUser, registerSalePaymentByUser } from './salesService'
 
+function ensureFirestoreReady() {
+  if (!db) {
+    throw Object.assign(new Error('Firestore não inicializado.'), { code: 'firestore/not-configured' })
+  }
+}
+
+function ensureUser(uid) {
+  if (!uid) {
+    throw Object.assign(new Error('Usuário não autenticado.'), { code: 'auth/not-authenticated' })
+  }
+}
+
 function getReceivablesCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   return collection(db, 'users', uid, 'financeiroReceber')
 }
 
 function getPaymentsHistoryCollectionRef(uid) {
+  ensureFirestoreReady()
+  ensureUser(uid)
   return collection(db, 'users', uid, 'financeiroRecebimentos')
 }
 
@@ -67,6 +83,40 @@ export async function listFinancialPaymentsByUser(uid) {
     id: entryDoc.id,
     ...entryDoc.data(),
   }))
+}
+
+export function subscribeReceivablesByUser(uid, onData, onError) {
+  const receivablesQuery = query(getReceivablesCollectionRef(uid), orderBy('dueDate', 'asc'))
+
+  return onSnapshot(
+    receivablesQuery,
+    (snapshot) => {
+      const receivables = snapshot.docs.map((entryDoc) => ({
+        id: entryDoc.id,
+        ...entryDoc.data(),
+      }))
+
+      onData(receivables)
+    },
+    onError,
+  )
+}
+
+export function subscribeFinancialPaymentsByUser(uid, onData, onError) {
+  const paymentsQuery = query(getPaymentsHistoryCollectionRef(uid), orderBy('paymentDate', 'desc'))
+
+  return onSnapshot(
+    paymentsQuery,
+    (snapshot) => {
+      const payments = snapshot.docs.map((entryDoc) => ({
+        id: entryDoc.id,
+        ...entryDoc.data(),
+      }))
+
+      onData(payments)
+    },
+    onError,
+  )
 }
 
 function dateRangeForToday() {
@@ -248,6 +298,7 @@ export function buildPriorities(receivables, clientsById) {
 }
 
 export async function loadFinancialModuleData(uid) {
+  ensureUser(uid)
   const [receivables, payments, sales, clients, salesSummary] = await Promise.all([
     listReceivablesByUser(uid),
     listFinancialPaymentsByUser(uid),
@@ -271,6 +322,7 @@ export async function loadFinancialModuleData(uid) {
 }
 
 export async function registerFinancialPaymentByUser(uid, receivable, payload) {
+  ensureUser(uid)
   const amount = parseNumber(payload.amount)
   const balance = computeReceivableBalance(receivable)
 

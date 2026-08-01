@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sidebarMenuItems } from '../constants/sidebarMenu'
 import { useAuth } from '../hooks/useAuth'
@@ -6,9 +6,10 @@ import DashboardLayout from '../layouts/DashboardLayout'
 import {
   createProductByUser,
   deleteProductByUser,
-  listProductsByUser,
+  subscribeProductsByUser,
   updateProductByUser,
 } from '../services/productsService'
+import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import '../styles/products-page.css'
 
 const PRODUCT_INITIAL_STATE = {
@@ -89,28 +90,31 @@ function ProductsPage() {
     })
   }, [products, searchTerm])
 
-  const loadProducts = useCallback(async () => {
-    if (!user?.uid) {
-      setLoadingProducts(false)
-      return
-    }
-
-    try {
-      setLoadingProducts(true)
-      setErrorMessage('')
-      const fetchedProducts = await listProductsByUser(user.uid)
-      setProducts(fetchedProducts)
-    } catch (error) {
-      console.error('Erro ao listar produtos:', error)
-      setErrorMessage('Não foi possível carregar os produtos. Tente novamente.')
-    } finally {
-      setLoadingProducts(false)
-    }
-  }, [user?.uid])
-
   useEffect(() => {
-    loadProducts()
-  }, [loadProducts])
+    if (!user?.uid) {
+      setProducts([])
+      setLoadingProducts(false)
+      return () => {}
+    }
+
+    setLoadingProducts(true)
+    setErrorMessage('')
+
+    const unsubscribe = subscribeProductsByUser(
+      user.uid,
+      (fetchedProducts) => {
+        setProducts(fetchedProducts)
+        setLoadingProducts(false)
+      },
+      (error) => {
+        console.error('Erro ao observar produtos:', error)
+        setErrorMessage(getFirebaseErrorMessage(error, 'Falha ao carregar produtos'))
+        setLoadingProducts(false)
+      },
+    )
+
+    return unsubscribe
+  }, [user?.uid])
 
   const handleSelectMenuItem = (itemKey) => {
     const menuItem = sidebarMenuItems.find((item) => item.key === itemKey)
@@ -233,19 +237,18 @@ function ProductsPage() {
 
       if (modalMode === 'create') {
         await createProductByUser(user.uid, payload)
-        setSuccessMessage('Produto cadastrado com sucesso.')
+        setSuccessMessage('Salvo com sucesso.')
       }
 
       if (modalMode === 'edit' && selectedProduct?.id) {
         await updateProductByUser(user.uid, selectedProduct.id, payload)
-        setSuccessMessage('Produto atualizado com sucesso.')
+        setSuccessMessage('Atualizado com sucesso.')
       }
 
-      await loadProducts()
       closeModal()
     } catch (error) {
       console.error('Erro ao salvar produto:', error)
-      setErrorMessage('Não foi possível salvar o produto. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível salvar o produto'))
     } finally {
       setSubmitting(false)
     }
@@ -267,11 +270,10 @@ function ProductsPage() {
       setDeletingId(product.id)
       setErrorMessage('')
       await deleteProductByUser(user.uid, product.id)
-      setSuccessMessage('Produto excluído com sucesso.')
-      await loadProducts()
+      setSuccessMessage('Excluído com sucesso.')
     } catch (error) {
       console.error('Erro ao excluir produto:', error)
-      setErrorMessage('Não foi possível excluir o produto. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível excluir o produto'))
     } finally {
       setDeletingId('')
     }

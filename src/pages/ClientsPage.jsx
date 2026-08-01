@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../layouts/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
@@ -6,9 +6,10 @@ import { sidebarMenuItems } from '../constants/sidebarMenu'
 import {
   createClientByUser,
   deleteClientByUser,
-  listClientsByUser,
+  subscribeClientsByUser,
   updateClientByUser,
 } from '../services/clientsService'
+import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import '../styles/clients-page.css'
 
 const CLIENT_INITIAL_STATE = {
@@ -94,28 +95,31 @@ function ClientsPage() {
     })
   }, [clients, searchTerm])
 
-  const loadClients = useCallback(async () => {
-    if (!user?.uid) {
-      setLoadingClients(false)
-      return
-    }
-
-    try {
-      setLoadingClients(true)
-      setErrorMessage('')
-      const fetchedClients = await listClientsByUser(user.uid)
-      setClients(fetchedClients)
-    } catch (error) {
-      console.error('Erro ao listar clientes:', error)
-      setErrorMessage('Não foi possível carregar os clientes. Tente novamente.')
-    } finally {
-      setLoadingClients(false)
-    }
-  }, [user?.uid])
-
   useEffect(() => {
-    loadClients()
-  }, [loadClients])
+    if (!user?.uid) {
+      setClients([])
+      setLoadingClients(false)
+      return () => {}
+    }
+
+    setLoadingClients(true)
+    setErrorMessage('')
+
+    const unsubscribe = subscribeClientsByUser(
+      user.uid,
+      (fetchedClients) => {
+        setClients(fetchedClients)
+        setLoadingClients(false)
+      },
+      (error) => {
+        console.error('Erro ao observar clientes:', error)
+        setErrorMessage(getFirebaseErrorMessage(error, 'Falha ao carregar clientes'))
+        setLoadingClients(false)
+      },
+    )
+
+    return unsubscribe
+  }, [user?.uid])
 
   const handleSelectMenuItem = (itemKey) => {
     const menuItem = sidebarMenuItems.find((item) => item.key === itemKey)
@@ -215,19 +219,18 @@ function ClientsPage() {
 
       if (modalMode === 'create') {
         await createClientByUser(user.uid, payload)
-        setSuccessMessage('Cliente cadastrado com sucesso.')
+        setSuccessMessage('Salvo com sucesso.')
       }
 
       if (modalMode === 'edit' && selectedClient?.id) {
         await updateClientByUser(user.uid, selectedClient.id, payload)
-        setSuccessMessage('Cliente atualizado com sucesso.')
+        setSuccessMessage('Atualizado com sucesso.')
       }
 
-      await loadClients()
       closeModal()
     } catch (error) {
       console.error('Erro ao salvar cliente:', error)
-      setErrorMessage('Não foi possível salvar o cliente. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível salvar o cliente'))
     } finally {
       setSubmitting(false)
     }
@@ -248,11 +251,10 @@ function ClientsPage() {
     try {
       setErrorMessage('')
       await deleteClientByUser(user.uid, client.id)
-      setSuccessMessage('Cliente excluído com sucesso.')
-      await loadClients()
+      setSuccessMessage('Excluído com sucesso.')
     } catch (error) {
       console.error('Erro ao excluir cliente:', error)
-      setErrorMessage('Não foi possível excluir o cliente. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível excluir o cliente'))
     }
   }
 

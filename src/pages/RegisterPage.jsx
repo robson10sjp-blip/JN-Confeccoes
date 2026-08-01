@@ -19,10 +19,6 @@ function RegisterPage() {
   const { user, register } = useAuth()
   const navigate = useNavigate()
 
-  if (user) {
-    return <Navigate to="/dashboard" replace />
-  }
-
   useEffect(() => {
     return () => {
       if (redirectTimerRef.current) {
@@ -30,6 +26,10 @@ function RegisterPage() {
       }
     }
   }, [])
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault()

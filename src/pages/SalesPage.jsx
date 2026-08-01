@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listClientsByUser } from '../services/clientsService'
-import { listProductsByUser } from '../services/productsService'
+import { subscribeProductsByUser } from '../services/productsService'
 import {
   createSaleByUser,
   deleteSaleByUser,
-  listSalesByUser,
+  getSaleReceiptDataByUser,
   registerSalePaymentByUser,
+  subscribeSalesByUser,
   updateSaleByUser,
 } from '../services/salesService'
+import { subscribeClientsByUser } from '../services/clientsService'
 import { sidebarMenuItems } from '../constants/sidebarMenu'
 import { useAuth } from '../hooks/useAuth'
 import DashboardLayout from '../layouts/DashboardLayout'
+import receiptLogo from '../assets/logo.png'
+import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import '../styles/sales-page.css'
 
 const PAYMENT_OPTIONS = ['À Vista', 'Prazo']
@@ -184,36 +187,79 @@ function SalesPage() {
     })
   }, [filters.client, filters.date, filters.status, sales])
 
-  const loadPageData = useCallback(async () => {
+  useEffect(() => {
     if (!user?.uid) {
+      setSales([])
+      setClients([])
+      setProducts([])
       setLoadingData(false)
-      return
+      return () => {}
     }
 
-    try {
-      setLoadingData(true)
-      setErrorMessage('')
+    let hasSalesLoaded = false
+    let hasClientsLoaded = false
+    let hasProductsLoaded = false
 
-      const [salesList, clientsList, productsList] = await Promise.all([
-        listSalesByUser(user.uid),
-        listClientsByUser(user.uid),
-        listProductsByUser(user.uid),
-      ])
+    const syncLoadingState = () => {
+      if (hasSalesLoaded && hasClientsLoaded && hasProductsLoaded) {
+        setLoadingData(false)
+      }
+    }
 
-      setSales(salesList)
-      setClients(clientsList)
-      setProducts(productsList)
-    } catch (error) {
-      console.error('Erro ao carregar dados de vendas:', error)
-      setErrorMessage('Não foi possível carregar os dados de vendas. Tente novamente.')
-    } finally {
-      setLoadingData(false)
+    setLoadingData(true)
+    setErrorMessage('')
+
+    const unsubscribeSales = subscribeSalesByUser(
+      user.uid,
+      (salesList) => {
+        setSales(salesList)
+        hasSalesLoaded = true
+        syncLoadingState()
+      },
+      (error) => {
+        console.error('Erro ao observar vendas:', error)
+        setErrorMessage(getFirebaseErrorMessage(error, 'Falha ao carregar vendas'))
+        hasSalesLoaded = true
+        syncLoadingState()
+      },
+    )
+
+    const unsubscribeClients = subscribeClientsByUser(
+      user.uid,
+      (clientsList) => {
+        setClients(clientsList)
+        hasClientsLoaded = true
+        syncLoadingState()
+      },
+      (error) => {
+        console.error('Erro ao observar clientes de vendas:', error)
+        setErrorMessage(getFirebaseErrorMessage(error, 'Falha ao carregar clientes'))
+        hasClientsLoaded = true
+        syncLoadingState()
+      },
+    )
+
+    const unsubscribeProducts = subscribeProductsByUser(
+      user.uid,
+      (productsList) => {
+        setProducts(productsList)
+        hasProductsLoaded = true
+        syncLoadingState()
+      },
+      (error) => {
+        console.error('Erro ao observar produtos de vendas:', error)
+        setErrorMessage(getFirebaseErrorMessage(error, 'Falha ao carregar produtos'))
+        hasProductsLoaded = true
+        syncLoadingState()
+      },
+    )
+
+    return () => {
+      unsubscribeSales()
+      unsubscribeClients()
+      unsubscribeProducts()
     }
   }, [user?.uid])
-
-  useEffect(() => {
-    loadPageData()
-  }, [loadPageData])
 
   const resetSaleModal = () => {
     setSaleForm({ ...SALE_INITIAL_FORM, items: [createEmptyItem()] })
@@ -413,19 +459,18 @@ function SalesPage() {
 
       if (modalState.type === 'create') {
         await createSaleByUser(user.uid, payload)
-        setSuccessMessage('Venda cadastrada com sucesso.')
+        setSuccessMessage('Salvo com sucesso.')
       }
 
       if (modalState.type === 'edit' && modalState.saleId) {
         await updateSaleByUser(user.uid, modalState.saleId, payload)
-        setSuccessMessage('Venda atualizada com sucesso.')
+        setSuccessMessage('Atualizado com sucesso.')
       }
 
-      await loadPageData()
       resetSaleModal()
     } catch (error) {
       console.error('Erro ao salvar venda:', error)
-      setErrorMessage(error?.message || 'Não foi possível salvar a venda. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível salvar a venda'))
     } finally {
       setSubmittingSale(false)
     }
@@ -447,11 +492,10 @@ function SalesPage() {
       setDeletingSaleId(sale.id)
       setErrorMessage('')
       await deleteSaleByUser(user.uid, sale.id)
-      setSuccessMessage('Venda excluída com sucesso.')
-      await loadPageData()
+      setSuccessMessage('Excluído com sucesso.')
     } catch (error) {
       console.error('Erro ao excluir venda:', error)
-      setErrorMessage(error?.message || 'Não foi possível excluir a venda. Tente novamente.')
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível excluir a venda'))
     } finally {
       setDeletingSaleId('')
     }
@@ -460,15 +504,64 @@ function SalesPage() {
   const handleSubmitReceive = async (event) => {
     event.preventDefault()
 
-    if (!user?.uid || !modalState.saleId) {
+    if (!user?.uid || !modalState.saleId || !currentSale) {
       setErrorMessage('Não foi possível identificar a venda selecionada.')
       return
     }
 
-    const amount = parseNumber(receiveForm.amount)
+    const rawAmount = String(receiveForm.amount ?? '').trim()
+    const amount = parseNumber(rawAmount)
+    const totalAmount = parseNumber(currentSale?.totalAmount)
+    const paidAmount = parseNumber(currentSale?.paidAmount ?? currentSale?.amountPaid)
+    const remainingAmount = Math.max(0, totalAmount - paidAmount)
+    const paymentDate = String(receiveForm.paymentDate ?? '').trim()
 
-    if (amount <= 0) {
+    if (!rawAmount) {
+      console.error('[sales/receive] Campo invalido:', {
+        field: 'amount',
+        rawAmount,
+      })
       setErrorMessage('Informe um valor válido para recebimento.')
+      return
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      console.error('[sales/receive] Campo invalido:', {
+        field: 'amount',
+        rawAmount,
+        amount,
+      })
+      setErrorMessage('Informe um valor válido para recebimento.')
+      return
+    }
+
+    if (amount > remainingAmount) {
+      console.error('[sales/receive] Campo invalido:', {
+        field: 'amount',
+        amount,
+        remainingAmount,
+      })
+      setErrorMessage('O valor informado ultrapassa o saldo da venda.')
+      return
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+      console.error('[sales/receive] Campo invalido:', {
+        field: 'paymentDate',
+        paymentDate,
+      })
+      setErrorMessage('Informe uma data de recebimento válida.')
+      return
+    }
+
+    const parsedPaymentDate = new Date(`${paymentDate}T12:00:00`)
+
+    if (Number.isNaN(parsedPaymentDate.getTime())) {
+      console.error('[sales/receive] Campo invalido:', {
+        field: 'paymentDate',
+        paymentDate,
+      })
+      setErrorMessage('Informe uma data de recebimento válida.')
       return
     }
 
@@ -480,53 +573,534 @@ function SalesPage() {
         user.uid,
         modalState.saleId,
         amount,
-        receiveForm.paymentDate,
+        paymentDate,
       )
 
-      setSuccessMessage('Recebimento registrado com sucesso.')
-      await loadPageData()
+      setSuccessMessage('Salvo com sucesso.')
       setModalState({ type: '', saleId: '' })
     } catch (error) {
-      console.error('Erro ao registrar recebimento:', error)
-      setErrorMessage(error?.message || 'Não foi possível registrar o recebimento.')
+      console.error('Erro ao registrar recebimento:', {
+        error,
+        code: error?.code,
+        message: error?.message,
+        stack: error?.stack,
+        field: error?.field,
+        amount,
+        paymentDate,
+        saleId: modalState.saleId,
+      })
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível registrar o recebimento'))
     } finally {
       setReceivingSaleId('')
     }
   }
 
-  const handleOpenReceipt = (sale) => {
+  const handleOpenReceipt = async (sale) => {
+    if (!user?.uid || !sale?.id) {
+      setErrorMessage('Não foi possível identificar a venda para gerar o recibo.')
+      return
+    }
+
+    let latestSale = sale
+    let paymentsHistory = []
+
+    try {
+      const receiptData = await getSaleReceiptDataByUser(user.uid, sale.id)
+      latestSale = receiptData.sale
+      paymentsHistory = receiptData.payments || []
+    } catch (error) {
+      console.error('Erro ao carregar dados atualizados do recibo:', error)
+      setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível carregar os dados do recibo'))
+      return
+    }
+
+    const receiptNumber = latestSale?.id ? String(latestSale.id).toUpperCase() : '-'
+    const saleDate = latestSale?.saleDate
+      ? new Date(`${latestSale.saleDate}T12:00:00`).toLocaleDateString('pt-BR')
+      : '-'
+
+    const formatAnyDate = (value) => {
+      if (!value) {
+        return '-'
+      }
+
+      if (typeof value?.toDate === 'function') {
+        return value.toDate().toLocaleDateString('pt-BR')
+      }
+
+      if (value?.seconds) {
+        return new Date(value.seconds * 1000).toLocaleDateString('pt-BR')
+      }
+
+      if (typeof value === 'string') {
+        const parsed = new Date(`${value}T12:00:00`)
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toLocaleDateString('pt-BR')
+        }
+      }
+
+      return '-'
+    }
+
+    const totalValue = parseNumber(latestSale?.totalAmount ?? latestSale?.total)
+    const amountPaid = parseNumber(latestSale?.amountPaid ?? latestSale?.paidAmount)
+    const remainingAmount = Math.max(
+      0,
+      parseNumber(latestSale?.remainingAmount, totalValue - amountPaid),
+    )
+    const saleStatus = latestSale?.status || (remainingAmount <= 0 ? 'Pago' : amountPaid > 0 ? 'Parcial' : 'Pendente')
+    const salePaymentsHistory = Array.isArray(latestSale?.payments) ? latestSale.payments : []
+    const normalizedPaymentsHistory = paymentsHistory.length > 0 ? paymentsHistory : salePaymentsHistory
+    const lastPaymentDate =
+      normalizedPaymentsHistory[0]?.paymentDate
+      || latestSale?.lastPaymentDate
+      || latestSale?.paymentDate
+      || latestSale?.updatedAt
+      || ''
+
+    const paymentsHistoryRows =
+      normalizedPaymentsHistory.length > 0
+        ? normalizedPaymentsHistory
+            .map(
+              (payment) =>
+                `<tr>
+                  <td>${formatAnyDate(payment.paymentDate)}</td>
+                  <td>${formatCurrency(payment.amount)}</td>
+                  <td>${payment.paymentMethod || '-'}</td>
+                  <td>${payment.observation || '-'}</td>
+                </tr>`,
+            )
+            .join('')
+        : '<tr><td colspan="4" class="empty-row">Nenhum recebimento registrado.</td></tr>'
+
     const receiptHtml = `
       <html>
         <head>
           <title>Recibo de Venda</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #111; }
-            h1 { margin: 0 0 12px; }
-            p { margin: 4px 0; }
-            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            @page {
+              size: A4;
+              margin: 14mm;
+            }
+
+            * {
+              box-sizing: border-box;
+            }
+
+            body {
+              margin: 0;
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              background: #f3f4f6;
+              color: #111827;
+              padding: 18px;
+            }
+
+            .receipt {
+              width: 100%;
+              max-width: 794px;
+              margin: 0 auto;
+              background: #ffffff;
+              border: 1px solid #e5e7eb;
+              border-radius: 18px;
+              box-shadow: 0 16px 40px rgba(17, 24, 39, 0.12);
+              overflow: hidden;
+              position: relative;
+            }
+
+            .watermark {
+              position: absolute;
+              inset: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              pointer-events: none;
+              opacity: 0.04;
+            }
+
+            .watermark img {
+              width: 360px;
+              max-width: 80%;
+            }
+
+            .receipt-content {
+              position: relative;
+              z-index: 1;
+              padding: 28px;
+            }
+
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              gap: 16px;
+              border-bottom: 1px solid #d1d5db;
+              padding-bottom: 16px;
+            }
+
+            .brand {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+            }
+
+            .brand img {
+              width: 68px;
+              height: 68px;
+              object-fit: contain;
+              border-radius: 12px;
+              border: 1px solid #e5e7eb;
+              padding: 6px;
+              background: #ffffff;
+            }
+
+            .brand h2 {
+              margin: 0;
+              font-size: 22px;
+              letter-spacing: 0.4px;
+              color: #111111;
+            }
+
+            .brand p {
+              margin: 4px 0 0;
+              color: #4b5563;
+              font-size: 13px;
+            }
+
+            .receipt-badge {
+              background: #111111;
+              color: #ffffff;
+              padding: 10px 14px;
+              border-radius: 12px;
+              text-align: right;
+              min-width: 190px;
+            }
+
+            .receipt-badge .title {
+              margin: 0;
+              font-size: 24px;
+              font-weight: 800;
+              letter-spacing: 2px;
+            }
+
+            .receipt-badge .meta {
+              margin-top: 6px;
+              font-size: 12px;
+              line-height: 1.5;
+              color: #e5e7eb;
+            }
+
+            .sections {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 14px;
+              margin-top: 18px;
+            }
+
+            .card {
+              border: 1px solid #e5e7eb;
+              background: linear-gradient(180deg, #ffffff, #f9fafb);
+              border-radius: 14px;
+              padding: 14px;
+              box-shadow: 0 6px 16px rgba(17, 24, 39, 0.06);
+            }
+
+            .card h3 {
+              margin: 0 0 10px;
+              font-size: 13px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #374151;
+            }
+
+            .detail-line {
+              margin: 6px 0;
+              font-size: 14px;
+              color: #1f2937;
+            }
+
+            .detail-line strong {
+              color: #111111;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 18px;
+              font-size: 13px;
+              border-radius: 12px;
+              overflow: hidden;
+            }
+
+            thead tr {
+              background: #111111;
+              color: #ffffff;
+            }
+
+            th,
+            td {
+              border: 1px solid #e5e7eb;
+              padding: 10px;
+              text-align: left;
+            }
+
+            tbody tr:nth-child(even) {
+              background: #f9fafb;
+            }
+
+            .empty-row {
+              text-align: center;
+              color: #6b7280;
+              padding: 18px;
+            }
+
+            .totals-and-pix {
+              display: grid;
+              grid-template-columns: 1.2fr 1fr;
+              gap: 14px;
+              margin-top: 18px;
+            }
+
+            .totals-card,
+            .pix-card,
+            .notes-card {
+              border: 1px solid #e5e7eb;
+              border-radius: 14px;
+              padding: 14px;
+              background: #ffffff;
+              box-shadow: 0 6px 16px rgba(17, 24, 39, 0.06);
+            }
+
+            .totals-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              padding: 8px 0;
+              border-bottom: 1px dashed #d1d5db;
+              color: #374151;
+              font-size: 14px;
+            }
+
+            .totals-row:last-child {
+              border-bottom: 0;
+              padding-bottom: 0;
+            }
+
+            .total-highlight {
+              color: #111111;
+              font-size: 18px;
+              font-weight: 800;
+            }
+
+            .pix-title {
+              margin: 0 0 8px;
+              font-size: 13px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #374151;
+            }
+
+            .pix-key {
+              border: 1px dashed #9ca3af;
+              border-radius: 12px;
+              padding: 12px;
+              font-weight: 700;
+              font-size: 20px;
+              text-align: center;
+              color: #111111;
+              background: #f9fafb;
+              margin: 8px 0;
+            }
+
+            .pix-info {
+              margin: 0;
+              color: #4b5563;
+              font-size: 12px;
+              line-height: 1.5;
+            }
+
+            .notes-card {
+              margin-top: 14px;
+            }
+
+            .notes-card h3 {
+              margin: 0 0 8px;
+              font-size: 13px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #374151;
+            }
+
+            .notes-card p {
+              margin: 0;
+              color: #374151;
+              line-height: 1.6;
+              font-size: 13px;
+            }
+
+            .footer {
+              margin-top: 20px;
+              border-top: 1px solid #d1d5db;
+              padding-top: 14px;
+              text-align: center;
+              color: #111111;
+              font-size: 13px;
+              line-height: 1.8;
+            }
+
+            @media print {
+              body {
+                background: #ffffff;
+                padding: 0;
+              }
+
+              .receipt {
+                border: 0;
+                border-radius: 0;
+                box-shadow: none;
+                max-width: none;
+              }
+
+              .receipt-content {
+                padding: 8mm;
+              }
+            }
+
+            @media (max-width: 768px) {
+              .receipt-content {
+                padding: 20px;
+              }
+
+              .header,
+              .totals-and-pix,
+              .sections {
+                grid-template-columns: 1fr;
+                display: grid;
+              }
+
+              .receipt-badge {
+                text-align: left;
+              }
+            }
           </style>
         </head>
         <body>
-          <h1>Recibo de Venda</h1>
-          <p><strong>Cliente:</strong> ${sale.clientName || '-'}</p>
-          <p><strong>Data:</strong> ${sale.saleDate || '-'}</p>
-          <p><strong>Forma de pagamento:</strong> ${sale.paymentMethod || '-'}</p>
-          <p><strong>Status:</strong> ${sale.status || '-'}</p>
-          <p><strong>Valor total:</strong> ${formatCurrency(sale.totalAmount)}</p>
-          <table>
-            <thead>
-              <tr><th>Produto</th><th>Qtd</th><th>Valor</th></tr>
-            </thead>
-            <tbody>
-              ${(sale.items || [])
-                .map(
-                  (item) =>
-                    `<tr><td>${item.productDescription || '-'}</td><td>${item.quantity || 0}</td><td>${formatCurrency(item.subtotal)}</td></tr>`,
-                )
-                .join('')}
-            </tbody>
-          </table>
+          <article class="receipt">
+            <div class="watermark">
+              <img src="${receiptLogo}" alt="Marca d'água JN Confecções" />
+            </div>
+
+            <section class="receipt-content">
+              <header class="header">
+                <div class="brand">
+                  <img src="${receiptLogo}" alt="Logo JN Confecções" />
+                  <div>
+                    <h2>JN Confecções</h2>
+                    <p>Documento comercial de venda</p>
+                  </div>
+                </div>
+
+                <div class="receipt-badge">
+                  <p class="title">RECIBO</p>
+                  <div class="meta">
+                    <div><strong>No:</strong> ${receiptNumber}</div>
+                    <div><strong>Data:</strong> ${saleDate}</div>
+                  </div>
+                </div>
+              </header>
+
+              <div class="sections">
+                <section class="card">
+                  <h3>Dados do cliente</h3>
+                  <p class="detail-line"><strong>Cliente:</strong> ${latestSale.clientName || '-'}</p>
+                </section>
+
+                <section class="card">
+                  <h3>Condição de pagamento</h3>
+                  <p class="detail-line"><strong>Condição:</strong> ${latestSale.paymentMethod || '-'}</p>
+                  <p class="detail-line"><strong>Status:</strong> ${saleStatus}</p>
+                  <p class="detail-line"><strong>Último recebimento:</strong> ${formatAnyDate(lastPaymentDate)}</p>
+                </section>
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    <th>Qtd</th>
+                    <th>Unitário</th>
+                    <th>Desconto</th>
+                    <th>Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(latestSale.items || [])
+                    .map(
+                      (item) =>
+                        `<tr>
+                          <td>${item.productDescription || '-'}</td>
+                          <td>${item.quantity || 0}</td>
+                          <td>${formatCurrency(item.unitPrice)}</td>
+                          <td>${formatCurrency(item.discount)}</td>
+                          <td>${formatCurrency(item.subtotal)}</td>
+                        </tr>`,
+                    )
+                    .join('') || '<tr><td colspan="5" class="empty-row">Nenhum produto informado.</td></tr>'}
+                </tbody>
+              </table>
+
+              <section class="totals-and-pix">
+                <div class="totals-card">
+                  <div class="totals-row">
+                    <span>Total de descontos</span>
+                    <strong>${formatCurrency(latestSale.totalDiscount)}</strong>
+                  </div>
+                  <div class="totals-row">
+                    <span>Valor total da venda</span>
+                    <strong>${formatCurrency(totalValue)}</strong>
+                  </div>
+                  <div class="totals-row">
+                    <span>Valor recebido acumulado</span>
+                    <strong>${formatCurrency(amountPaid)}</strong>
+                  </div>
+                  <div class="totals-row">
+                    <span>Saldo a receber</span>
+                    <strong class="total-highlight">${formatCurrency(remainingAmount)}</strong>
+                  </div>
+                </div>
+
+                <div class="pix-card">
+                  <p class="pix-title">Pagamento via PIX</p>
+                  <div class="pix-key">49.185.965/0001-95</div>
+                  <p class="pix-info">Chave PIX (CNPJ): 49.185.965/0001-95</p>
+                </div>
+              </section>
+
+              <section class="notes-card">
+                <h3>Observações</h3>
+                <p>Recibo emitido pela JN Confecções referente ao fornecimento dos itens listados acima.</p>
+              </section>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data do recebimento</th>
+                    <th>Valor</th>
+                    <th>Forma</th>
+                    <th>Observação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${paymentsHistoryRows}
+                </tbody>
+              </table>
+
+              <footer class="footer">
+                <div>CNPJ: 49.185.965/0001-95</div>
+                <div>JN Confecções</div>
+                <div>Qualidade você encontra aqui!</div>
+              </footer>
+            </section>
+          </article>
         </body>
       </html>
     `
