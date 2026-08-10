@@ -166,6 +166,26 @@ function normalizeItem(item) {
   }
 }
 
+function resolveLegacyProductId(item) {
+  if (!item || typeof item !== 'object') {
+    return ''
+  }
+
+  if (typeof item.productId === 'string' && item.productId.trim()) {
+    return item.productId.trim()
+  }
+
+  if (typeof item.id === 'string' && item.id.trim()) {
+    return item.id.trim()
+  }
+
+  if (typeof item.product?.id === 'string' && item.product.id.trim()) {
+    return item.product.id.trim()
+  }
+
+  return ''
+}
+
 function normalizeSalePayload(payload) {
   const items = (payload.items || []).map(normalizeItem)
   const totalDiscount = items.reduce((acc, item) => acc + item.discount, 0)
@@ -285,8 +305,8 @@ export async function listSalesByUser(uid) {
   const snapshot = await getDocs(salesQuery)
 
   return snapshot.docs.map((saleDoc) => ({
-    id: saleDoc.id,
     ...saleDoc.data(),
+    id: saleDoc.id,
   }))
 }
 
@@ -297,8 +317,8 @@ export function subscribeSalesByUser(uid, onData, onError) {
     salesQuery,
     (snapshot) => {
       const sales = snapshot.docs.map((saleDoc) => ({
-        id: saleDoc.id,
         ...saleDoc.data(),
+        id: saleDoc.id,
       }))
 
       onData(sales)
@@ -532,39 +552,22 @@ export async function updateSaleByUser(uid, saleId, payload) {
 export async function deleteSaleByUser(uid, saleId) {
   ensureFirestoreReady()
   ensureUser(uid)
-  const saleRef = doc(getSalesCollectionRef(uid), saleId)
 
-  await runTransaction(db, async (transaction) => {
-    const saleSnapshot = await transaction.get(saleRef)
+  if (!saleId || typeof saleId !== 'string' || !saleId.trim()) {
+    throw Object.assign(new Error('Venda sem ID válido para exclusão.'), {
+      code: 'sales/invalid-sale-id',
+    })
+  }
 
-    if (!saleSnapshot.exists()) {
-      throw Object.assign(new Error('Venda não encontrada.'), { code: 'sales/not-found' })
-    }
+  const normalizedSaleId = saleId.trim()
+  const saleRef = doc(db, 'users', uid, 'sales', normalizedSaleId)
+  const saleSnapshot = await getDoc(saleRef)
 
-    const saleData = saleSnapshot.data()
-    const saleItems = saleData.items || []
+  if (!saleSnapshot.exists()) {
+    throw Object.assign(new Error('Venda não encontrada.'), { code: 'sales/not-found' })
+  }
 
-    for (const item of saleItems) {
-      const productRef = doc(getProductsCollectionRef(uid), item.productId)
-      const productSnapshot = await transaction.get(productRef)
-
-      if (!productSnapshot.exists()) {
-        continue
-      }
-
-      const currentStock = toNumber(productSnapshot.data().stockQuantity)
-      const nextStock = currentStock + toNumber(item.quantity)
-
-      transaction.update(productRef, {
-        stockQuantity: nextStock,
-        updatedAt: serverTimestamp(),
-      })
-    }
-
-    await deleteReceivablesBySaleId(uid, saleId, transaction)
-
-    transaction.delete(saleRef)
-  })
+  await deleteDoc(saleRef)
 }
 
 export async function registerSalePaymentByUser(uid, saleId, paymentAmount, paymentDate) {

@@ -476,9 +476,15 @@ function SalesPage() {
     }
   }
 
-  const handleDeleteSale = async (sale) => {
+  const handleDeleteSale = async (saleId, sale) => {
     if (!user?.uid) {
       setErrorMessage('Não foi possível identificar o usuário logado.')
+      return
+    }
+
+    if (!saleId) {
+      console.error('Venda sem ID:', sale)
+      window.alert('Esta venda antiga não possui um ID válido para exclusão.')
       return
     }
 
@@ -489,9 +495,9 @@ function SalesPage() {
     }
 
     try {
-      setDeletingSaleId(sale.id)
+      setDeletingSaleId(saleId)
       setErrorMessage('')
-      await deleteSaleByUser(user.uid, sale.id)
+      await deleteSaleByUser(user.uid, saleId)
       setSuccessMessage('Excluído com sucesso.')
     } catch (error) {
       console.error('Erro ao excluir venda:', error)
@@ -1225,7 +1231,7 @@ function SalesPage() {
                           <button
                             type="button"
                             className="danger"
-                            onClick={() => handleDeleteSale(sale)}
+                            onClick={() => handleDeleteSale(sale.id, sale)}
                             disabled={deletingSaleId === sale.id}
                           >
                             {deletingSaleId === sale.id ? 'Excluindo...' : '🗑 Excluir'}

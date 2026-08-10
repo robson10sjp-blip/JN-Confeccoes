@@ -25,6 +25,8 @@ const PRODUCT_INITIAL_STATE = {
   observation: '',
 }
 
+const PRODUCT_CATEGORIES = ['Masculino', 'Feminino', 'Infantil', 'Outros']
+
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -391,9 +393,11 @@ function ProductsPage() {
               <label htmlFor="category">Categoria</label>
               <select id="category" name="category" value={formData.category} onChange={handleFormChange}>
                 <option value="">Selecione</option>
-                <option value="Masculino">Masculino</option>
-                <option value="Feminino">Feminino</option>
-                <option value="Infantil">Infantil</option>
+                {PRODUCT_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
               </select>
 
               <label htmlFor="size">Tamanho</label>
