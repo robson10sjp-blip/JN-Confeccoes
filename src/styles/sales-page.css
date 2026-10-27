@@ -360,6 +360,14 @@
 .sales-review-note { padding: 12px; background: #fff8e9; color: #6b501e; border-left: 3px solid #ac7625; }
 .sale-view-grid p { margin: 4px 0; overflow-wrap: anywhere; }
 .sale-payments li { margin-block: 9px; }
+.sales-delete-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px 14px; border: 1px solid #aa6658; border-radius: 8px; background: #ffffff; color: #8b2f24; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.sales-delete-button:hover { background: #fff0ed; }
+.sales-row-actions .sales-delete-button { color: #8b2f24; border-color: #aa6658; }
+.sale-receipt-overlay { position: fixed; inset: 0; z-index: 70; display: grid; grid-template-rows: auto minmax(0, 1fr); background: #edf2ef; min-width: 0; }
+.sale-receipt-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); background: #ffffff; border-bottom: 1px solid #d7dfdb; }
+.sale-receipt-overlay iframe { width: 100%; height: 100%; min-width: 0; border: 0; background: #ffffff; }
+@media print { .sale-receipt-toolbar { display: none !important; } }
+@media (max-width: 440px) { .sale-receipt-toolbar { padding: 10px; gap: 8px; flex-wrap: wrap; } .sale-receipt-toolbar button { flex: 1 1 130px; } .sales-row-actions .sales-delete-button { grid-column: 1 / -1; } }
 
 @media (max-width: 1200px) {
   .sales-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -204,8 +204,21 @@ erro/retry, filtros, historico, PDF, recibo e notebook/celular).
 - Criacao usa identificador por envio e agrega quantidades do mesmo produto, baixando uma vez por produto em transacao. Novas vendas com pagamento inicial o registram no historico da propria venda. Isso nao adiciona pagamentos a vendas antigas.
 - Edicao nao consulta queries dentro da transacao, nao le depois de escrever, nao recria parcelas nem pagamentos. Itens/data identicos ficam intactos; mudar preco atual do produto nao muda preco historico. Diferencas de quantidade usam apenas o delta de estoque. Mudancas em condicoes financeiras ou totais vinculados ficam bloqueadas para revisao especifica.
 - Recebimento atualiza venda e parcelas na mesma transacao, com identificador idempotente por envio da tela. Valores divergentes ou saldo insuficiente bloqueiam a operacao. Chamadas do Financeiro continuam usando a mesma assinatura, sem novo lancamento financeiro criado automaticamente por este servico.
-- Exclusao direta saiu da lista para preservar historico nesta etapa. Recibo continua disponivel nos detalhes. Regras/configuracoes Firebase e publicacao nao foram alteradas.
+- **Excluir venda** esta na lista e nos detalhes. A confirmacao mostra cliente, data, valor, vinculos e estoque antes/quantidade/depois. A operacao retira a venda da movimentacao atual e adiciona `saleCancellation` na venda e nas contas/pagamentos/recibos vinculados por IDs exatos; originais ficam consultaveis em **Excluidas (historico)**. Nao apaga pagamentos, nao altera seus valores/datas nem simula estorno de dinheiro. Os lancamentos cancelados ficam fora dos totais atuais recebidos e a divida atual e zero, sem rotular a conta como paga.
+- Devolucao exige prova de baixa ainda valida para todos os produtos da venda (`stockDebitProof` e `stockMovementId`), sem `stockReturn.completed` nem devolucao anterior registrada no usuario. Venda antiga sem prova fica em conferencia; nenhuma quantidade e adivinhada. Cancelamento/vinculos/devolucao usam uma unica transacao; repeticao reconhece o marcador e nao incrementa estoque novamente. Mudancas na venda, vinculos, estoque ou estado do reinicio exigem reabrir a confirmacao. Limite de 400 documentos afetados, sem gravacao parcial.
+- Transacoes de editar/receber recusam registros cancelados. A leitura de vinculos antecede a transacao e os documentos capturados sao reconferidos nela; pagamentos concorrentes pelos servicos atuais disputam os mesmos documentos e sao rejeitados ou exigem nova conferencia. Escritas externas, clientes antigos ou alteracoes manuais fora desses servicos nao tem garantia global de ausencia de novos vinculos; evite outras abas durante a exclusao. Nao foram abertas regras nem instalado backend novo.
+- Recibo abre dentro da mesma tela, com **Voltar** e **Imprimir recibo** fora do documento. Voltar preserva ficha, pesquisa e filtros, sem depender de pop-up ou `window.close()` no iPhone. Impressao/PDF usam somente o documento no iframe, sem controles; no celular, os campos da tabela ficam empilhados apenas na tela, mantendo o modelo de impressao. Regras/configuracoes Firebase e publicacao nao foram alteradas nesta tarefa; estas mudancas precisam de nova publicacao autorizada para aparecer no site.
 - Recuperacao de dados reais exige uma sessao autorizada ou exportacao somente leitura do mesmo UID (sales, financeiroReceber, financeiroRecebimentos, clients e IDs de produtos). Conferir IDs exatos e backup; contas sem itens/data de venda confiavel nao podem ser reconstruidas como vendas apenas por nome ou valor.
+
+Teste focado seguro: `node scripts/test-sale-deletion.mjs` (SDK inteiramente
+simulado; falha antes do commit, repeticao, venda parcialmente/totalmente paga,
+concorrencia, vinculos exatos, estoque antigo sem prova e devolucao anterior).
+Com Vite local ativo, `JN_SALE_DELETION_ONLY=1 node scripts/test-query-pages.mjs`
+confere lista/ficha, confirmacao, clique duplo, saldo e recibo em 1366/390/320 px,
+sem rede externa ou banco real. `JN_TEST_BROWSER=webkit` seleciona WebKit quando
+o navegador e suas bibliotecas estiverem disponiveis. Safari/iPhone fisico ainda
+exige validacao no aparelho; WebKit nao executou neste conteiner por dependencias
+de sistema ausentes. Nenhuma exclusao ou reinicio real foi executado nestes testes.
 
 Testes seguros: `node scripts/test-sales-records.mjs` e o teste de navegador
 `scripts/test-query-pages.mjs`. SDK/banco sao simulados, incluindo entradas,

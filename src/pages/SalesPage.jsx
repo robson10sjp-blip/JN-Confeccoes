@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   createSaleByUser,
+  deleteSaleByUser,
   getSaleReceiptDataByUser,
   registerSalePaymentByUser,
   subscribeSalesModuleSource,
@@ -12,12 +13,14 @@ import { useAuth } from '../hooks/useAuth'
 import DashboardLayout from '../layouts/DashboardLayout'
 import receiptLogo from '../assets/logo.png'
 import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
+import { prepareSaleDeletionByUser } from '../services/saleDeletionService'
+import { isSaleCancelled, SALE_CANCELLATION_LABEL } from '../utils/saleDeletion'
 import { displayText } from '../utils/displayText'
 import { formatRecordDate, recordNumber, toDateKey } from '../utils/recordFilters'
 import { buildDashboardSummary, getDashboardPeriod } from '../utils/dashboardSummary'
 import { buildSaleDueDates, buildSalesView, normalizeSalesText, saleRecordedPayments } from '../utils/salesRecords'
 import { parseProductPrice, productDescription, productStock } from '../utils/productRecords'
-import { ArrowLeft, BadgeDollarSign, Banknote, CalendarDays, ChevronLeft, ChevronRight, CircleAlert, Eye, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingBag, Wallet, X } from 'lucide-react'
+import { ArrowLeft, BadgeDollarSign, Banknote, CalendarDays, ChevronLeft, ChevronRight, CircleAlert, Eye, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingBag, Trash2, Wallet, X } from 'lucide-react'
 import '../styles/sales-page.css'
 
 const PAYMENT_OPTIONS = ['À Vista', 'Prazo']
@@ -116,6 +119,14 @@ function SalesPage() {
   const [page, setPage] = useState(1)
   const requests = useRef({ sale: '', payment: '' })
   const dialogRef = useRef(null)
+  const [deletion, setDeletion] = useState({ status: 'idle', preview: null, error: '' })
+  const [deletingSale, setDeletingSale] = useState(false)
+  const deletionRunning = useRef(false)
+  const deletionRequest = useRef(0)
+  const [receiptHtml, setReceiptHtml] = useState('')
+  const [loadingReceipt, setLoadingReceipt] = useState(false)
+  const receiptFrame = useRef(null)
+  const receiptDialog = useRef(null)
   const [submittingSale, setSubmittingSale] = useState(false)
   const [receivingSaleId, setReceivingSaleId] = useState('')
   const [filters, setFilters] = useState({
@@ -201,6 +212,8 @@ function SalesPage() {
     setProducts([])
     setPayments([])
     setModalState({ type: '', saleId: '' })
+    setReceiptHtml('')
+    deletionRequest.current += 1
     if (!user?.uid) { setLoadingData(false); return () => { active = false } }
     const setters = { sales: setSales, clients: setClients, products: setProducts, receivables: setReceivables, payments: setPayments }
     for (const [source, setData] of Object.entries(setters)) {
@@ -280,6 +293,53 @@ function SalesPage() {
     setErrorMessage('')
     setModalState({ type: 'view', saleId: sale.id })
   }
+
+  const openDeleteSaleModal = async sale => {
+    if (deletionRunning.current || !sale?.id || isSaleCancelled(sale)) return
+    const requestId = ++deletionRequest.current
+    setErrorMessage('')
+    setDeletion({ status: 'loading', preview: null, error: '' })
+    setModalState({ type: 'delete', saleId: sale.id })
+    try {
+      const preview = await prepareSaleDeletionByUser(user.uid, sale.id)
+      if (requestId !== deletionRequest.current) return
+      setDeletion({ status: 'ready', preview, error: '' })
+    } catch (error) {
+      if (requestId !== deletionRequest.current) return
+      setDeletion({ status: 'error', preview: null, error: error?.code ? getFirebaseErrorMessage(error, 'Não foi possível conferir a exclusão') : error?.message || 'Não foi possível conferir a exclusão.' })
+    }
+  }
+
+  const confirmDeleteSale = async () => {
+    if (deletionRunning.current || deletion.status !== 'ready' || !deletion.preview || deletion.preview.saleId !== modalState.saleId) return
+    deletionRunning.current = true
+    setDeletingSale(true)
+    setErrorMessage('')
+    try {
+      const result = await deleteSaleByUser(user.uid, deletion.preview.saleId, deletion.preview)
+      setSuccessMessage(result.alreadyCancelled ? 'A venda já estava excluída. Nenhuma quantidade foi devolvida novamente.' : `Venda excluída das movimentações atuais. ${result.returnedUnits} unidade(s) devolvida(s). Contas e pagamentos vinculados foram cancelados, com histórico preservado.${result.stockNeedsReview ? ' Estoque antigo precisa de conferência; nenhuma quantidade sem prova foi inventada.' : ''}`)
+      setModalState({ type: '', saleId: '' })
+    } catch (error) {
+      setErrorMessage(error?.code ? getFirebaseErrorMessage(error, 'Não foi possível excluir a venda') : error?.message || 'Não foi possível excluir a venda.')
+    } finally { deletionRunning.current = false; setDeletingSale(false) }
+  }
+
+  useEffect(() => {
+    if (!receiptHtml || !receiptDialog.current) return
+    const previousFocus = document.activeElement
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    receiptDialog.current.querySelector('button')?.focus()
+    const onKey = event => {
+      if (event.key === 'Escape') setReceiptHtml('')
+      if (event.key !== 'Tab') return
+      const elements = [...receiptDialog.current.querySelectorAll('button, iframe')]
+      if (event.shiftKey && document.activeElement === elements[0]) { event.preventDefault(); elements.at(-1)?.focus() }
+      if (!event.shiftKey && document.activeElement === elements.at(-1)) { event.preventDefault(); elements[0]?.focus() }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', onKey); if (previousFocus?.isConnected) previousFocus.focus() }
+  }, [receiptHtml])
 
   useEffect(() => {
     const saleId = location.state?.financialSaleId
@@ -607,6 +667,7 @@ function SalesPage() {
   }
 
   const handleOpenReceipt = async (sale) => {
+    if (loadingReceipt) return
     if (!user?.uid || !sale?.id) {
       setErrorMessage('Não foi possível identificar a venda para gerar o recibo.')
       return
@@ -616,12 +677,14 @@ function SalesPage() {
     let paymentsHistory = []
 
     try {
+      setLoadingReceipt(true)
       const receiptData = await getSaleReceiptDataByUser(user.uid, sale.id)
       latestSale = receiptData.sale
       paymentsHistory = receiptData.payments || []
     } catch (error) {
       console.error('Erro ao carregar dados atualizados do recibo:', error)
       setErrorMessage(getFirebaseErrorMessage(error, 'Não foi possível carregar os dados do recibo'))
+      setLoadingReceipt(false)
       return
     }
 
@@ -631,11 +694,11 @@ function SalesPage() {
 
     const totalValue = parseNumber(latestSale?.totalAmount ?? latestSale?.total)
     const amountPaid = parseNumber(latestSale?.amountPaid ?? latestSale?.paidAmount)
-    const remainingAmount = Math.max(
+    const remainingAmount = isSaleCancelled(latestSale) ? 0 : Math.max(
       0,
       parseNumber(latestSale?.remainingAmount, totalValue - amountPaid),
     )
-    const saleStatus = latestSale?.status || (remainingAmount <= 0 ? 'Pago' : amountPaid > 0 ? 'Parcial' : 'Pendente')
+    const saleStatus = isSaleCancelled(latestSale) ? SALE_CANCELLATION_LABEL : latestSale?.status || (remainingAmount <= 0 ? 'Pago' : amountPaid > 0 ? 'Parcial' : 'Pendente')
     const salePaymentsHistory = Array.isArray(latestSale?.payments) ? latestSale.payments : []
     const normalizedPaymentsHistory = paymentsHistory.length > 0 ? paymentsHistory : salePaymentsHistory
     const lastPaymentDate =
@@ -651,16 +714,16 @@ function SalesPage() {
             .map(
               (payment) =>
                 `<tr>
-                  <td>${formatAnyDate(payment.paymentDate)}</td>
-                  <td>${formatCurrency(payment.amount)}</td>
-                  <td>${payment.paymentMethod || '-'}</td>
-                  <td>${payment.observation || '-'}</td>
+                  <td data-label="Data do recebimento">${formatAnyDate(payment.paymentDate)}</td>
+                  <td data-label="Valor">${formatCurrency(payment.amount)}</td>
+                  <td data-label="Forma">${payment.paymentMethod || '-'}</td>
+                  <td data-label="Observação">${payment.observation || '-'}</td>
                 </tr>`,
             )
             .join('')
         : '<tr><td colspan="4" class="empty-row">Nenhum recebimento registrado.</td></tr>'
 
-    const receiptHtml = `
+    const generatedReceiptHtml = `
       <html>
         <head>
           <title>Recibo de Venda</title>
@@ -952,7 +1015,7 @@ function SalesPage() {
               }
             }
 
-            @media (max-width: 768px) {
+            @media screen and (max-width: 768px) {
               .receipt-content {
                 padding: 20px;
               }
@@ -966,7 +1029,28 @@ function SalesPage() {
 
               .receipt-badge {
                 text-align: left;
+                min-width: 0;
+                overflow-wrap: anywhere;
               }
+            }
+
+            @media screen and (max-width: 600px) {
+              table, tbody, tr, td { display: block; width: 100%; }
+              thead { display: none; }
+              tbody tr { border: 1px solid #d1d5db; margin-bottom: 12px; }
+              td:not(.empty-row) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; border: 0; border-bottom: 1px solid #e5e7eb; overflow-wrap: anywhere; }
+              td:not(.empty-row)::before { content: attr(data-label); font-weight: 700; }
+              .sections, .totals-and-pix { grid-template-columns: minmax(0, 1fr); }
+              .brand, .brand > div, .card, .pix-card, .totals-card { min-width: 0; overflow-wrap: anywhere; }
+              .pix-key { font-size: 17px; }
+              .totals-row { gap: 8px; align-items: start; }
+              .totals-row strong { text-align: right; }
+              .receipt-content { padding: 16px; }
+              body { padding: 10px; }
+              .brand h2 { font-size: 20px; letter-spacing: 0; }
+              .brand img { flex: 0 0 60px; width: 60px; height: 60px; }
+              .brand p { overflow-wrap: anywhere; }
+              .receipt-badge .title { letter-spacing: 0; }
             }
           </style>
         </head>
@@ -1020,15 +1104,15 @@ function SalesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  ${(latestSale.items || [])
+                  ${(Array.isArray(latestSale.items) ? latestSale.items : [])
                     .map(
                       (item) =>
                         `<tr>
-                          <td>${item.productDescription || '-'}</td>
-                          <td>${item.quantity || 0}</td>
-                          <td>${formatCurrency(item.unitPrice)}</td>
-                          <td>${formatCurrency(item.discount)}</td>
-                          <td>${formatCurrency(item.subtotal)}</td>
+                          <td data-label="Produto">${item.productDescription || '-'}</td>
+                          <td data-label="Quantidade">${item.quantity || 0}</td>
+                          <td data-label="Unitário">${formatCurrency(item.unitPrice)}</td>
+                          <td data-label="Desconto">${formatCurrency(item.discount)}</td>
+                          <td data-label="Subtotal">${formatCurrency(item.subtotal)}</td>
                         </tr>`,
                     )
                     .join('') || '<tr><td colspan="5" class="empty-row">Nenhum produto informado.</td></tr>'}
@@ -1092,16 +1176,8 @@ function SalesPage() {
       </html>
     `
 
-    const newWindow = window.open('', '_blank')
-
-    if (!newWindow) {
-      setErrorMessage('Não foi possível abrir o recibo no navegador.')
-      return
-    }
-
-    newWindow.document.write(receiptHtml)
-    newWindow.document.close()
-    newWindow.focus()
+    setReceiptHtml(generatedReceiptHtml)
+    setLoadingReceipt(false)
   }
 
   const handleSelectMenuItem = (itemKey) => {
@@ -1148,7 +1224,7 @@ function SalesPage() {
           {period === 'custom' ? <div className="sales-date-fields"><label>Data inicial<input type="date" lang="pt-BR" value={dates.from} onChange={event => { setDates(previous => ({ ...previous, from: event.target.value })); setPage(1) }} /></label><label>Data final<input type="date" lang="pt-BR" value={dates.to} onChange={event => { setDates(previous => ({ ...previous, to: event.target.value })); setPage(1) }} /></label>{invalidRange ? <p role="alert">Informe as duas datas, com a inicial antes ou igual à final.</p> : null}</div> : null}
           <p className="sales-period-caption" aria-live="polite"><CalendarDays size={20} aria-hidden="true" />{period === 'all' ? 'Todo o período' : invalidRange ? 'Escolha as datas' : `${formatRecordDate(range.from)} a ${formatRecordDate(range.to)}`}</p>
         </section>
-        <section className="sales-filters" aria-label="Busca e situação"><label><span><Search size={20} aria-hidden="true" />Buscar cliente</span><input type="search" value={filters.client} placeholder="Nome ou como é conhecido" onChange={event => { setFilters(previous => ({ ...previous, client: event.target.value })); setPage(1) }} /></label><label>Situação<select value={filters.status} onChange={event => { setFilters(previous => ({ ...previous, status: event.target.value })); setPage(1) }}><option value="">Todas as atuais</option><option value="Em aberto">Em aberto</option><option value="Parcialmente paga">Parcialmente paga</option><option value="Paga">Paga</option><option value="Encerrada para reinício">Encerradas para reinício</option></select></label><button type="button" className="sales-secondary-button" onClick={clearFilters}><RotateCcw size={20} aria-hidden="true" />Limpar filtros</button></section>
+        <section className="sales-filters" aria-label="Busca e situação"><label><span><Search size={20} aria-hidden="true" />Buscar cliente</span><input type="search" value={filters.client} placeholder="Nome ou como é conhecido" onChange={event => { setFilters(previous => ({ ...previous, client: event.target.value })); setPage(1) }} /></label><label>Situação<select value={filters.status} onChange={event => { setFilters(previous => ({ ...previous, status: event.target.value })); setPage(1) }}><option value="">Todas as atuais</option><option value="Em aberto">Em aberto</option><option value="Parcialmente paga">Parcialmente paga</option><option value="Paga">Paga</option><option value="Encerrada para reinício">Encerradas para reinício</option><option value={SALE_CANCELLATION_LABEL}>Excluídas (histórico)</option></select></label><button type="button" className="sales-secondary-button" onClick={clearFilters}><RotateCcw size={20} aria-hidden="true" />Limpar filtros</button></section>
         <details className="sales-due-filters"><summary>Pesquisar por vencimento</summary><div className="sales-date-fields"><label>Vencimento de<input type="date" value={filters.dueFrom} onChange={event => { setFilters(previous => ({ ...previous, dueFrom: event.target.value })); setPage(1) }} /></label><label>Vencimento até<input type="date" value={filters.dueTo} onChange={event => { setFilters(previous => ({ ...previous, dueTo: event.target.value })); setPage(1) }} /></label></div></details>
         <section className="sales-summary" aria-label="Indicadores do período">{[
           { title: 'Quantidade de vendas', icon: ShoppingBag, value: metricValue(filteredSales.length, false, false), caption: 'Data da venda, busca e situação selecionadas' },
@@ -1197,9 +1273,10 @@ function SalesPage() {
                           <button type="button" onClick={() => openViewSaleModal(sale)}>
                             <Eye size={20} aria-hidden="true" />Ver detalhes
                           </button>
-                          <button type="button" onClick={() => openEditSaleModal(sale)}>
+                          <button type="button" onClick={() => openEditSaleModal(sale)} disabled={isSaleCancelled(sale)}>
                             <Pencil size={20} aria-hidden="true" />Editar
                           </button>
+                          <button type="button" className="sales-delete-button" onClick={() => openDeleteSaleModal(sale)} disabled={isSaleCancelled(sale)}><Trash2 size={20} aria-hidden="true" />Excluir venda</button>
                         </div>
                       </td>
                     </tr>
@@ -1432,10 +1509,19 @@ function SalesPage() {
               </div>
               <section className="sale-payments"><h3>Pagamentos registrados</h3>{currentPayments.length ? <ul>{currentPayments.map((payment, index) => <li key={payment.paymentId || payment.id || index}><strong>{formatCurrency(payment.amount)}</strong> · {formatRecordDate(payment.paymentDate)}</li>)}</ul> : <p>Nenhum lançamento de pagamento localizado. Valores acumulados antigos não são convertidos em novos pagamentos.</p>}</section>
               {errorMessage ? <p className="sales-message error" role="alert">{errorMessage}</p> : null}
-              <footer className="sale-form-actions"><button type="button" className="sales-secondary-button" onClick={() => setModalState({ type: '', saleId: '' })}><ArrowLeft size={21} aria-hidden="true" />Voltar</button><button type="button" className="sales-secondary-button" onClick={() => handleOpenReceipt(currentSale)}><Printer size={21} aria-hidden="true" />Recibo</button><button type="button" className="sales-primary-button" onClick={() => openReceiveModal(currentSale)} disabled={!(currentSaleDisplay.balance > 0)}><Banknote size={21} aria-hidden="true" />Receber pagamento</button></footer>
+              <footer className="sale-form-actions"><button type="button" className="sales-secondary-button" onClick={() => setModalState({ type: '', saleId: '' })}><ArrowLeft size={21} aria-hidden="true" />Voltar</button><button type="button" className="sales-secondary-button" onClick={() => handleOpenReceipt(currentSale)} disabled={loadingReceipt}><Printer size={21} aria-hidden="true" />{loadingReceipt ? 'Abrindo recibo…' : 'Recibo'}</button><button type="button" className="sales-primary-button" onClick={() => openReceiveModal(currentSale)} disabled={!(currentSaleDisplay.balance > 0)}><Banknote size={21} aria-hidden="true" />Receber pagamento</button><button type="button" className="sales-delete-button" onClick={() => openDeleteSaleModal(currentSale)} disabled={isSaleCancelled(currentSale)}><Trash2 size={20} aria-hidden="true" />Excluir venda</button></footer>
             </section>
           </div>
         ) : null}
+
+        {modalState.type === 'delete' ? <div className="sale-modal-overlay" role="presentation"><section className="sale-modal" role="dialog" aria-modal="true" aria-labelledby="sale-delete-title" ref={dialogRef}><header className="sale-modal-header"><h2 id="sale-delete-title">Excluir venda?</h2><button type="button" className="sales-secondary-button" onClick={() => setModalState({ type: '', saleId: '' })} disabled={deletingSale}><X size={20} aria-hidden="true" />Fechar</button></header>
+          {deletion.status === 'loading' ? <p role="status">Conferindo venda, estoque e pagamentos…</p> : null}
+          {deletion.error ? <p className="sales-message error" role="alert">{deletion.error}</p> : null}
+          {deletion.preview ? <><div className="sale-view-grid"><p><strong>Cliente:</strong> {displayText(clients.find(client => client.id === deletion.preview.sale.clientId)?.name || deletion.preview.sale.clientName)}</p><p><strong>Data:</strong> {formatRecordDate(deletion.preview.sale.saleDate)}</p><p><strong>Valor da venda:</strong> {formatCurrency(deletion.preview.sale.totalAmount)}</p></div><p>A venda será retirada das movimentações atuais. Contas deixarão de ser cobradas e pagamentos vinculados ficarão cancelados no histórico, sem apagar os valores nem simular devolução de dinheiro.</p><p>Vínculos encontrados: {deletion.preview.counts.accounts} conta(s), {deletion.preview.counts.payments + deletion.preview.counts.otherPayments} pagamento(s) e {deletion.preview.counts.receipts} recibo(s).</p>{deletion.preview.plan.returns.length ? <section><h3>Devolução comprovada ao estoque</h3><ul>{deletion.preview.plan.returns.map(entry => <li key={entry.productId}>{entry.description}: {entry.quantity} unidade(s) · estoque {entry.before} → {entry.after}</li>)}</ul></section> : <p className="sales-review-note">Nenhuma quantidade será devolvida automaticamente.</p>}{deletion.preview.plan.warnings.map((warning, index) => <p className="sales-review-note" key={index}>{warning}</p>)}</> : null}
+          {errorMessage ? <p className="sales-message error" role="alert">{errorMessage}</p> : null}<footer className="sale-form-actions"><button type="button" className="sales-secondary-button" onClick={() => setModalState({ type: '', saleId: '' })} disabled={deletingSale}>Cancelar</button><button type="button" className="sales-delete-button" onClick={confirmDeleteSale} disabled={deletingSale || deletion.status !== 'ready'}><Trash2 size={21} aria-hidden="true" />{deletingSale ? 'Excluindo…' : 'Confirmar exclusão'}</button></footer>
+        </section></div> : null}
+
+        {receiptHtml ? <div className="sale-receipt-overlay" role="dialog" aria-modal="true" aria-label="Recibo da venda" ref={receiptDialog}><div className="sale-receipt-toolbar"><button type="button" className="sales-secondary-button" onClick={() => setReceiptHtml('')}><ArrowLeft size={22} aria-hidden="true" />Voltar</button><button type="button" className="sales-primary-button" onClick={() => { receiptFrame.current?.contentWindow?.focus(); receiptFrame.current?.contentWindow?.print() }}><Printer size={22} aria-hidden="true" />Imprimir recibo</button></div><iframe title="Documento do recibo" ref={receiptFrame} srcDoc={receiptHtml} sandbox="allow-same-origin allow-modals" /></div> : null}
 
         {modalState.type === 'receive' && currentSale ? (
           <div className="sale-modal-overlay" role="presentation">

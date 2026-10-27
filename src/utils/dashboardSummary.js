@@ -1,5 +1,6 @@
 import { computeReceivableBalance, computeReceivableStatus, computeSaleStatus, matchesDateRange, recordNumber, toDateKey } from './recordFilters.js'
 import { isRestartClosed } from './systemRestart.js'
+import { isSaleCancelled } from './saleDeletion.js'
 
 export function getDashboardPeriod(mode = 'all', custom = {}, today = toDateKey(new Date())) {
   if (mode === 'today') return { from: today, to: today }
@@ -18,6 +19,7 @@ function nonnegative(value) {
 }
 
 export function getDashboardSaleBalance(sale) {
+  if (isSaleCancelled(sale)) return 0
   if (isRestartClosed(sale)) return 0
   const amount = nonnegative(sale.totalAmount)
   const paid = nonnegative(sale.paidAmount ?? sale.amountPaid)
@@ -27,6 +29,11 @@ export function getDashboardSaleBalance(sale) {
 }
 
 export function buildDashboardSummary({ sales = [], payments = [], receivables = [], clients = [], products = [] }, range = {}, today = toDateKey(new Date())) {
+  const cancelledSales = new Set(sales.filter(isSaleCancelled).map(sale => sale.id))
+  const cancelledAccounts = new Set(receivables.filter(isSaleCancelled).map(account => account.id))
+  sales = sales.filter(sale => !isSaleCancelled(sale))
+  receivables = receivables.filter(account => !isSaleCancelled(account))
+  payments = payments.filter(payment => !isSaleCancelled(payment) && !cancelledSales.has(payment.saleId) && !cancelledAccounts.has(payment.receivableId))
   const warnings = []
   const warn = (code, count, message) => { if (count) warnings.push({ code, count, message }) }
   const selectedSales = sales.filter(sale => !isRestartClosed(sale) && matchesDateRange(sale.saleDate, range.from, range.to))

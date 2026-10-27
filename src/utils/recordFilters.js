@@ -1,4 +1,5 @@
 import { isRestartClosed, RESTART_LABEL } from './systemRestart.js'
+import { isSaleCancelled, SALE_CANCELLATION_LABEL } from './saleDeletion.js'
 
 export function toDateKey(value) {
   if (!value) return ''
@@ -42,6 +43,7 @@ export function recordNumber(value) {
 }
 
 export function computeReceivableBalance(receivable) {
+  if (isSaleCancelled(receivable)) return 0
   if (isRestartClosed(receivable)) return 0
   const amount = recordNumber(receivable.amount)
   const received = recordNumber(receivable.receivedAmount ?? 0)
@@ -49,6 +51,7 @@ export function computeReceivableBalance(receivable) {
 }
 
 export function computeReceivableStatus(receivable, today = toDateKey(new Date())) {
+  if (isSaleCancelled(receivable)) return SALE_CANCELLATION_LABEL
   if (isRestartClosed(receivable)) return RESTART_LABEL
   const balance = computeReceivableBalance(receivable)
   if (balance === null) return 'Não informado'
@@ -59,6 +62,7 @@ export function computeReceivableStatus(receivable, today = toDateKey(new Date()
 }
 
 export function computeSaleStatus(sale, receivables = [], today = toDateKey(new Date())) {
+  if (isSaleCancelled(sale)) return SALE_CANCELLATION_LABEL
   if (isRestartClosed(sale)) return RESTART_LABEL
   const amount = recordNumber(sale.totalAmount)
   const paid = recordNumber(sale.paidAmount ?? sale.amountPaid)
@@ -105,7 +109,7 @@ export function filterRecords(records, filters) {
 }
 
 export function buildSalesSummary(sales) {
-  return sales.reduce((summary, sale) => ({
+  return sales.filter(sale => !isSaleCancelled(sale)).reduce((summary, sale) => ({
     totalSales: summary.totalSales + 1,
     totalSoldValue: summary.totalSoldValue + (recordNumber(sale.totalAmount) ?? 0),
     totalProductsSold: summary.totalProductsSold + (Array.isArray(sale.items) ? sale.items : []).reduce((total, item) => total + (recordNumber(item.quantity) ?? 0), 0),

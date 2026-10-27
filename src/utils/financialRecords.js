@@ -2,15 +2,16 @@ import { buildDashboardSummary } from './dashboardSummary.js'
 import { matchesDateRange, recordNumber, sortRecordsByDate, toDateKey } from './recordFilters.js'
 import { displayText } from './displayText.js'
 import { isRestartClosed, RESTART_LABEL } from './systemRestart.js'
+import { isSaleCancelled, SALE_CANCELLATION_LABEL } from './saleDeletion.js'
 
 export function financialAccountValues(account, today = toDateKey(new Date())) {
   const amount = recordNumber(account.amount)
   const paid = recordNumber(account.receivedAmount)
   const isMoney = value => value !== null && value >= 0 && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) < 0.000001
   const valid = isMoney(amount) && isMoney(paid) && paid <= amount
-  const balance = isRestartClosed(account) ? 0 : valid ? amount - paid : null
+  const balance = isRestartClosed(account) || isSaleCancelled(account) ? 0 : valid ? amount - paid : null
   const due = toDateKey(account.dueDate)
-  const status = isRestartClosed(account) ? RESTART_LABEL : balance === null ? 'Não confirmada' : balance === 0 ? 'Paga' : due && due < today ? 'Em atraso' : paid > 0 ? 'Parcialmente paga' : 'Em aberto'
+  const status = isSaleCancelled(account) ? SALE_CANCELLATION_LABEL : isRestartClosed(account) ? RESTART_LABEL : balance === null ? 'Não confirmada' : balance === 0 ? 'Paga' : due && due < today ? 'Em atraso' : paid > 0 ? 'Parcialmente paga' : 'Em aberto'
   return { amount, paid, balance, status, due }
 }
 
@@ -63,7 +64,7 @@ export function buildFinancialView({ receivables = [], payments = [], sales = []
     return history.length && (account.paid === null || Math.abs(history.reduce((sum, payment) => sum + (recordNumber(payment.amount) ?? 0), 0) - account.paid) > 0.01)
   }).length
   const untracedPaidCount = rows.filter(account => {
-    if (!(account.paid > 0) || accountPaymentHistory(account, payments).length) return false
+    if (isSaleCancelled(account) || !(account.paid > 0) || accountPaymentHistory(account, payments).length) return false
     const sale = salesById.get(account.saleId)
     return !sale || !(Array.isArray(sale.payments) && sale.payments.length || payments.some(payment => payment.saleId === sale.id))
   }).length

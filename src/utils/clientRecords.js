@@ -1,6 +1,7 @@
 import { getDashboardSaleBalance } from './dashboardSummary.js'
 import { computeSaleStatus, recordNumber, sortRecordsByDate } from './recordFilters.js'
 import { isRestartClosed } from './systemRestart.js'
+import { isSaleCancelled } from './saleDeletion.js'
 
 export function normalizeClientText(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, ' ')
@@ -75,6 +76,7 @@ export function buildClientChanges(draft, original = null) {
 }
 
 function reliableClientSaleBalance(sale) {
+  if (isSaleCancelled(sale)) return 0
   if (isRestartClosed(sale)) return 0
   const amount = recordNumber(sale.totalAmount)
   const paidValue = sale.paidAmount ?? sale.amountPaid
@@ -103,7 +105,7 @@ export function inspectClientRelations(clientId, records) {
   const unresolvedCount = Object.values(records).flat().filter(entry => !hasReliableOwner(entry)).length
   const conflicting = [...accounts, ...payments, ...receipts, ...otherPayments].some(entry => owners(entry).size > 1)
   const balances = sales.map(reliableClientSaleBalance)
-  const inconsistentSales = sales.filter(sale => !isRestartClosed(sale)).some(sale => {
+  const inconsistentSales = sales.filter(sale => !isRestartClosed(sale) && !isSaleCancelled(sale)).some(sale => {
     const linked = accounts.filter(entry => entry.saleId === sale.id)
     if (!linked.length) return false
     const amounts = linked.map(entry => recordNumber(entry.amount))
@@ -115,7 +117,7 @@ export function inspectClientRelations(clientId, records) {
     return Math.abs(accountAmount - Number(sale.totalAmount)) < 0.01 && Math.abs(accountAmount - accountPaid - reliableClientSaleBalance(sale)) > 0.01
   })
   const accountBalances = accounts.filter(entry => !saleIds.has(entry.saleId)).map(entry => {
-    if (isRestartClosed(entry)) return 0
+    if (isRestartClosed(entry) || isSaleCancelled(entry)) return 0
     const amount = recordNumber(entry.amount)
     const received = recordNumber(entry.receivedAmount)
     return amount === null || received === null || amount < 0 || received < 0 || received > amount ? null : amount - received
@@ -130,8 +132,8 @@ export function inspectClientRelations(clientId, records) {
     payments,
     hasRelated,
     unresolvedCount,
-    unresolvedDebtCount: [...(records.sales || []), ...(records.receivables || [])].filter(entry => !isRestartClosed(entry) && !hasReliableOwner(entry)).length,
+    unresolvedDebtCount: [...(records.sales || []), ...(records.receivables || [])].filter(entry => !isRestartClosed(entry) && !isSaleCancelled(entry) && !hasReliableOwner(entry)).length,
     conflicting,
-    balance: !sales.some(sale => !isRestartClosed(sale)) && !accounts.some(account => !isRestartClosed(account)) ? 0 : conflicting || inconsistentSales || [...balances, ...accountBalances].some(value => value === null) ? null : [...balances, ...accountBalances].reduce((sum, value) => sum + value, 0),
+    balance: !sales.some(sale => !isRestartClosed(sale) && !isSaleCancelled(sale)) && !accounts.some(account => !isRestartClosed(account) && !isSaleCancelled(account)) ? 0 : conflicting || inconsistentSales || [...balances, ...accountBalances].some(value => value === null) ? null : [...balances, ...accountBalances].reduce((sum, value) => sum + value, 0),
   }
 }

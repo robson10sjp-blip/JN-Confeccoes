@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { recordNumber, toDateKey } from '../src/utils/recordFilters.js'
 import { buildSaleDueDates, buildSalesView, saleRecordedPayments } from '../src/utils/salesRecords.js'
 import { isRestartClosed } from '../src/utils/systemRestart.js'
+import { isSaleCancelled } from '../src/utils/saleDeletion.js'
 
 const viewSales = [{ id: 'old', clientId: 'c1', saleDate: '2020-01-01', totalAmount: 100, paidAmount: 40, payments: [{ amount: 40, paymentDate: '2026-10-27' }] }, { id: 'new', clientId: 'c2', saleDate: '2026-10-27', totalAmount: 50, paidAmount: 50 }]
 const viewClients = [{ id: 'c1', name: 'Cliente fictício', nickname: 'Vavá' }, { id: 'c2', name: 'Outro cliente' }]
@@ -25,7 +26,7 @@ const ref = path => ({ path, id: path.split('/').at(-1) })
 const snapshot = document => ({ id: document.id, ref: document, exists: () => documents.has(document.path), data: () => structuredClone(documents.get(document.path)) })
 const getDocs = async query => ({ docs: [...documents].filter(([path, data]) => path.startsWith(query.path + '/') && path.split('/').length === query.path.split('/').length + 1 && (query.conditions || []).every(condition => data[condition.field] === condition.value)).map(([path]) => snapshot(ref(path))) })
 const service = vm.runInNewContext(`${source}\n;({ createSaleByUser, updateSaleByUser, registerSalePaymentByUser })`, {
-  db: {}, console, recordNumber, toDateKey, isRestartClosed,
+  db: {}, console, recordNumber, toDateKey, isRestartClosed, isSaleCancelled,
   collection: (_db, ...parts) => ref(parts.join('/')),
   doc: (parent, ...parts) => ref(parent.path ? `${parent.path}/${parts.length ? parts.join('/') : `generated-${++generatedId}`}` : parts.join('/')),
   query: (collection, ...conditions) => ({ ...collection, conditions }), where: (field, _operator, value) => ({ field, value }),

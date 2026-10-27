@@ -1,6 +1,7 @@
 import { buildDashboardSummary, getDashboardSaleBalance } from './dashboardSummary.js'
 import { matchesDateRange, prepareSales, recordNumber, sortRecordsByDate, toDateKey } from './recordFilters.js'
 import { isRestartClosed, RESTART_LABEL } from './systemRestart.js'
+import { isSaleCancelled, SALE_CANCELLATION_LABEL } from './saleDeletion.js'
 
 export function normalizeSalesText(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, ' ')
@@ -17,11 +18,11 @@ export function buildSalesView(sales, clients, receivables, payments, filters, r
   const rows = prepareSales(sales, clients, receivables).map(sale => {
     const balance = getDashboardSaleBalance(sale)
     const total = recordNumber(sale.totalAmount)
-    const received = isRestartClosed(sale) ? recordNumber(sale.paidAmount ?? sale.amountPaid) : balance === null || total === null ? null : total - balance
-    return { ...sale, nickname: clientsById.get(sale.clientId)?.nickname || '', balance, received, situation: isRestartClosed(sale) ? RESTART_LABEL : balance === null ? 'Não confirmada' : balance === 0 ? 'Paga' : received > 0 ? 'Parcialmente paga' : 'Em aberto' }
+    const received = isRestartClosed(sale) || isSaleCancelled(sale) ? recordNumber(sale.paidAmount ?? sale.amountPaid) : balance === null || total === null ? null : total - balance
+    return { ...sale, nickname: clientsById.get(sale.clientId)?.nickname || '', balance, received, situation: isSaleCancelled(sale) ? SALE_CANCELLATION_LABEL : isRestartClosed(sale) ? RESTART_LABEL : balance === null ? 'Não confirmada' : balance === 0 ? 'Paga' : received > 0 ? 'Parcialmente paga' : 'Em aberto' }
   })
   const term = normalizeSalesText(filters.client)
-  const scope = rows.filter(sale => (filters.status === RESTART_LABEL ? isRestartClosed(sale) : !isRestartClosed(sale)) && (!term || [sale.clientName, sale.nickname].some(value => normalizeSalesText(value).includes(term))) && (!filters.status || (filters.status === 'Em aberto' ? sale.balance > 0 : sale.situation === filters.status)) && (!filters.dueFrom && !filters.dueTo || sale.filterDueDates.some(date => matchesDateRange(date, filters.dueFrom, filters.dueTo))))
+  const scope = rows.filter(sale => (filters.status === SALE_CANCELLATION_LABEL ? isSaleCancelled(sale) : !isSaleCancelled(sale) && (filters.status === RESTART_LABEL ? isRestartClosed(sale) : !isRestartClosed(sale))) && (!term || [sale.clientName, sale.nickname].some(value => normalizeSalesText(value).includes(term))) && (!filters.status || (filters.status === 'Em aberto' ? sale.balance > 0 : sale.situation === filters.status)) && (!filters.dueFrom && !filters.dueTo || sale.filterDueDates.some(date => matchesDateRange(date, filters.dueFrom, filters.dueTo))))
   const ids = new Set(scope.map(sale => sale.id))
   const accountIds = new Set(receivables.filter(entry => ids.has(entry.saleId)).map(entry => entry.id))
   const filtered = Boolean(term || filters.status || filters.dueFrom || filters.dueTo)

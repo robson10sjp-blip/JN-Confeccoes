@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { recordNumber, toDateKey } from '../src/utils/recordFilters.js'
 import { displayProductDescription, displayText } from '../src/utils/displayText.js'
 import { isRestartClosed } from '../src/utils/systemRestart.js'
+import { isSaleCancelled } from '../src/utils/saleDeletion.js'
 import { buildDashboardSummary } from '../src/utils/dashboardSummary.js'
 import { buildProductChanges, filterProductRecords, findProductCodeDuplicates, getProductCategories, inspectProductSales, mapProductDraft, parseProductPrice, productStock, productValuation, summarizeProducts, validateProductDraft, valueProductStock } from '../src/utils/productRecords.js'
 
@@ -115,7 +116,7 @@ const salesSource = (await readFile(new URL('../src/services/salesService.js', i
 const documents = new Map([['users/test-only/products/p1', { stockQuantity: 10, size: 'P, M, G e GG', color: 'Azul / branco' }]])
 let generatedId = 0
 const salesService = vm.runInNewContext(`${salesSource}\n;({ createSaleByUser })`, {
-  db: {}, console, recordNumber, toDateKey, isRestartClosed,
+  db: {}, console, recordNumber, toDateKey, isRestartClosed, isSaleCancelled,
   collection: (_db, ...parts) => ({ path: parts.join('/') }),
   doc: (ref, ...parts) => {
     const path = ref.path ? `${ref.path}/${parts.length ? parts.join('/') : `sale-${++generatedId}`}` : parts.join('/')

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 import { recordNumber, toDateKey } from '../src/utils/recordFilters.js'
 import { isRestartClosed } from '../src/utils/systemRestart.js'
+import { isSaleCancelled } from '../src/utils/saleDeletion.js'
 import { accountPaymentHistory, buildFinancialView, financialAccountValues, financialDueRange } from '../src/utils/financialRecords.js'
 
 const today = '2026-10-27'
@@ -46,7 +47,7 @@ let generatedId = 0
 const ref = path => ({ path, id: path.split('/').at(-1) })
 const snapshot = document => ({ ref: document, id: document.id, exists: () => documents.has(document.path), data: () => structuredClone(documents.get(document.path)) })
 const service = vm.runInNewContext(`${source}\n;({ registerFinancialPaymentByUser })`, {
-  db: {}, recordNumber, toDateKey, financialAccountValues, isRestartClosed,
+  db: {}, recordNumber, toDateKey, financialAccountValues, isRestartClosed, isSaleCancelled,
   collection: (_db, ...parts) => ref(parts.join('/')), doc: (parent, ...parts) => ref(parent.path ? `${parent.path}/${parts.length ? parts.join('/') : `operation-${++generatedId}`}` : parts.join('/')),
   query: (collection, ...conditions) => ({ ...collection, conditions }), where: (field, _operator, value) => ({ field, value }),
   getDocsFromServer: async query => ({ docs: [...documents].filter(([path, data]) => path.startsWith(query.path + '/') && (query.conditions || []).every(condition => data[condition.field] === condition.value)).map(([path]) => snapshot(ref(path))) }),

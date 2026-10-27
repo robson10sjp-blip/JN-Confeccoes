@@ -6,6 +6,7 @@ import { buildSalesSummary, computeReceivableBalance, computeReceivableStatus, s
 import { financialAccountValues } from '../utils/financialRecords'
 import { recordNumber } from '../utils/recordFilters'
 import { isRestartClosed } from '../utils/systemRestart'
+import { isSaleCancelled } from '../utils/saleDeletion'
 
 export { computeReceivableBalance, computeReceivableStatus }
 
@@ -329,6 +330,7 @@ export async function registerFinancialPaymentByUser(uid, receivable, payload) {
     const accountSnapshot = await transaction.get(accountRef)
     if (!accountSnapshot.exists()) throw new Error('A conta não foi localizada. Nenhum pagamento foi registrado.')
     const account = accountSnapshot.data()
+    if (isSaleCancelled(account)) throw new Error('Esta conta foi cancelada pela exclusão da venda e não aceita pagamentos.')
     if (isRestartClosed(account)) throw new Error('Esta conta foi encerrada para reinício e não aceita novos pagamentos.')
     if ((account.saleId || '') !== (receivable.saleId || '')) throw new Error('O vínculo da conta mudou. Reabra a conta antes de receber.')
     const values = financialAccountValues(account)
@@ -339,6 +341,7 @@ export async function registerFinancialPaymentByUser(uid, receivable, payload) {
     let saleUpdate = null
     if (saleSnapshot?.exists()) {
       const sale = saleSnapshot.data()
+      if (isSaleCancelled(sale)) throw new Error('A venda desta conta foi excluída. O recebimento foi bloqueado.')
       if (isRestartClosed(sale)) throw new Error('A venda desta conta foi encerrada para reinício. Confira o vínculo antes de receber.')
       const total = recordNumber(sale.totalAmount)
       const paid = recordNumber(sale.paidAmount ?? sale.amountPaid)

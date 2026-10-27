@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chromium } from 'playwright'
+import { chromium, devices, webkit } from 'playwright'
 
 const baseUrl = process.env.JN_TEST_URL || 'http://localhost:5173'
 const origin = new URL(baseUrl).origin
@@ -37,6 +37,7 @@ window.__allowProductWrites = false;
 window.__allowSalesWrites = false;
 window.__allowFinancialWrites = false;
 window.__allowRestartWrites = false;
+window.__allowSaleDeletionWrites = false;
 let generatedId = 0;
 const listeners = new Map();
 export const collection = (_db, ...parts) => ({ path: parts.join('/') });
@@ -77,12 +78,13 @@ function blocked() { window.__writes++; throw new Error('Gravação bloqueada no
 function recordWrite(operation, ref, payload) {
   const parts = ref.path.split('/');
   const restartAllowed = window.__allowRestartWrites && (parts.length === 2 || ['products', 'sales', 'financeiroReceber', 'financeiroRecebimentos', 'receipts', 'payments'].includes(parts[2]));
-  const allowed = restartAllowed || parts[2] === 'clients' && window.__allowClientWrites || parts[2] === 'products' && (window.__allowProductWrites || window.__allowSalesWrites) || ['sales', 'financeiroReceber'].includes(parts[2]) && window.__allowSalesWrites || ['sales', 'financeiroReceber', 'financeiroRecebimentos'].includes(parts[2]) && window.__allowFinancialWrites;
+  const allowed = restartAllowed || window.__allowSaleDeletionWrites && ['products', 'sales', 'financeiroReceber', 'financeiroRecebimentos', 'receipts', 'payments'].includes(parts[2]) || parts[2] === 'clients' && window.__allowClientWrites || parts[2] === 'products' && (window.__allowProductWrites || window.__allowSalesWrites) || ['sales', 'financeiroReceber'].includes(parts[2]) && window.__allowSalesWrites || ['sales', 'financeiroReceber', 'financeiroRecebimentos'].includes(parts[2]) && window.__allowFinancialWrites;
   if (!allowed || parts[0] !== 'users' || parts[1] !== 'test-jn-only' || ![2, 3, 4].includes(parts.length)) return blocked();
   if (sessionStorage.getItem(parts[2] === 'clients' ? 'fail-client-save' : 'fail-product-save')) throw Object.assign(new Error('Falha simulada ao salvar'), { code: 'unavailable' });
   if (window.__allowSalesWrites && sessionStorage.getItem('fail-sale-save')) throw Object.assign(new Error('Falha simulada ao salvar venda'), { code: 'unavailable' });
   if (window.__allowFinancialWrites && sessionStorage.getItem('fail-financial-save')) throw Object.assign(new Error('Falha simulada no recebimento'), { code: 'unavailable' });
   if (window.__allowRestartWrites && sessionStorage.getItem('fail-restart')) throw Object.assign(new Error('Falha simulada no reinício'), { code: 'unavailable' });
+  if (window.__allowSaleDeletionWrites && sessionStorage.getItem('fail-sale-deletion')) throw Object.assign(new Error('Falha simulada na exclusão'), { code: 'unavailable' });
   window.__writes++;
   window.__mockWrites.push({ operation, path: ref.path, payload });
 }
@@ -92,7 +94,7 @@ export async function updateDoc(ref, data) { recordWrite('update', ref, data); c
 export async function deleteDoc(ref) { recordWrite('delete', ref); const source = ref.path.split('/')[2]; fixtures[source] = fixtures[source].filter(record => record.id !== ref.path.split('/').at(-1)); notifySource(source); }
 export const serverTimestamp = () => ({ seconds: 1793102400 });
 export async function runTransaction(_db, callback) {
-  if (!window.__allowProductWrites && !window.__allowSalesWrites && !window.__allowFinancialWrites && !window.__allowRestartWrites) return blocked();
+  if (!window.__allowProductWrites && !window.__allowSalesWrites && !window.__allowFinancialWrites && !window.__allowRestartWrites && !window.__allowSaleDeletionWrites) return blocked();
   const pending = [];
   const result = await callback({
     get: async ref => { if (pending.length || !ref.path.startsWith('users/test-jn-only') || ref.conditions) throw new Error('Transação inválida no teste'); const entry = ref.path === 'users/test-jn-only' ? userDocument : fixtures[ref.path.split('/')[2]].find(record => record.id === ref.path.split('/').at(-1)); const { id, ...data } = entry || {}; return { ref, exists: () => Boolean(entry), data: () => structuredClone(data) }; },
@@ -112,8 +114,8 @@ export const getDocFromServer = getDoc;
 export class Timestamp { static fromDate(date) { return { seconds: date.getTime() / 1000 }; } }
 `
 
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', viewport: { width: 1440, height: 1000 } })
+const browser = await (process.env.JN_TEST_BROWSER === 'webkit' ? webkit : chromium).launch({ headless: true })
+const context = await browser.newContext({ ...(process.env.JN_TEST_BROWSER === 'webkit' ? devices['iPhone 13'] : {}), locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', viewport: { width: 1440, height: 1000 } })
 const page = await context.newPage()
 const pageErrors = []
 page.on('pageerror', error => pageErrors.push(error.message))
@@ -155,7 +157,81 @@ async function financialMetric(title, expected) {
   await page.locator('.financial-card').filter({ has: page.locator('p', { hasText: new RegExp('^' + title + '$') }) }).locator('strong').filter({ hasText: expected }).waitFor()
 }
 
+async function testSaleDeletionAndReceipt() {
+  await open('/vendas')
+  await page.evaluate(() => {
+    window.__allowSaleDeletionWrites = true;
+    window.__setTestSales([{ id: 'cancel-ui', clientId: 'c1', clientName: 'Cliente de teste', saleDate: '2026-10-27', totalAmount: 300, amountPaid: 50, paidAmount: 50, remainingAmount: 250, paymentMethod: 'Prazo', payments: [{ amount: 50, paymentDate: '2026-10-27' }], items: [{ productId: 'cancel-product', productDescription: 'Produto isolado', quantity: 3, unitPrice: 100, subtotal: 300 }], stockDebitProof: { version: 1, items: [{ productId: 'cancel-product', quantity: 3, before: 10, after: 7, eventId: 'cancel-proof' }] } }]);
+    window.__setTestSource('products', [{ id: 'cancel-product', description: 'Produto isolado', stockQuantity: 7, salePrice: 100, stockMovementId: 'cancel-proof' }]);
+    window.__setTestSource('financeiroReceber', [{ id: 'cancel-account', saleId: 'cancel-ui', clientId: 'c1', amount: 300, receivedAmount: 50, dueDate: '2026-11-27' }]);
+    window.__setTestSource('financeiroRecebimentos', [{ id: 'cancel-payment', receivableId: 'cancel-account', amount: 50, paymentDate: '2026-10-27' }]);
+    window.__setTestSource('receipts', [{ id: 'cancel-receipt', saleId: 'cancel-ui', originalField: 'preservado' }]);
+    window.__setTestSource('payments', [{ id: 'cancel-other-payment', saleId: 'cancel-ui', amount: 50 }]);
+  })
+  await page.getByRole('searchbox', { name: 'Buscar cliente', exact: true }).fill('VAVA')
+  await page.getByRole('combobox', { name: 'Situação', exact: true }).selectOption('Parcialmente paga')
+  await page.getByRole('button', { name: 'Excluir venda', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: 'Excluir venda?', exact: true })
+  await confirmation.getByRole('button', { name: 'Confirmar exclusão', exact: true }).waitFor({ state: 'visible' })
+  await confirmation.getByText('3 unidade(s) · estoque 7 → 10', { exact: false }).waitFor()
+  assert.match((await confirmation.innerText()).replace(/\u00a0/g, ' '), /Cliente de teste[\s\S]*27\/10\/2026[\s\S]*300,00/)
+  await confirmation.getByRole('button', { name: 'Cancelar', exact: true }).click()
+  assert.equal(await page.evaluate(() => window.__writes), 0)
+  await page.getByRole('button', { name: 'Ver detalhes', exact: true }).click()
+  for (const size of [{ width: 1366, height: 768 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
+    await page.setViewportSize(size)
+    await page.getByRole('button', { name: 'Recibo', exact: true }).click()
+    const viewer = page.getByRole('dialog', { name: 'Recibo da venda', exact: true })
+    const receipt = page.frameLocator('iframe[title="Documento do recibo"]')
+    await receipt.locator('.receipt').waitFor()
+    assert.match((await receipt.locator('body').innerText()).replace(/\u00a0/g, ' '), /300,00/)
+    assert.equal(await receipt.getByRole('button').count(), 0)
+    assert.equal(await viewer.evaluate(element => element.scrollWidth <= element.clientWidth), true)
+    assert.equal(await receipt.locator('html').evaluate(element => element.scrollWidth <= element.clientWidth), true, 'Recibo legível sem transbordar a tela')
+    assert.equal(await receipt.locator('td').evaluateAll(elements => elements.every(element => { const bounds = element.getBoundingClientRect(); return bounds.left >= 0 && bounds.right <= window.innerWidth })), true, 'Todas as colunas visíveis, sem corte pelo contêiner')
+    await viewer.getByRole('button', { name: 'Imprimir recibo', exact: true }).waitFor()
+    await page.emulateMedia({ media: 'print' })
+    assert.equal(await page.locator('.sale-receipt-toolbar').isVisible(), false)
+    await page.emulateMedia({ media: 'screen' })
+    if (process.env.JN_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.JN_SCREENSHOT_DIR}/jn-receipt-${process.env.JN_TEST_BROWSER || 'chromium'}-${size.width}.png`, animations: 'disabled' })
+    await viewer.getByRole('button', { name: 'Voltar', exact: true }).click()
+    assert.equal(await page.getByRole('heading', { name: 'Detalhes da venda', exact: true }).isVisible(), true)
+    assert.equal(await page.getByRole('searchbox', { name: 'Buscar cliente', exact: true }).inputValue(), 'VAVA')
+    assert.equal(await page.getByRole('combobox', { name: 'Situação', exact: true }).inputValue(), 'Parcialmente paga')
+  }
+  await page.setViewportSize({ width: 1366, height: 900 })
+  await page.getByRole('dialog', { name: 'Detalhes da venda', exact: true }).getByRole('button', { name: 'Excluir venda', exact: true }).click()
+  await confirmation.getByText('3 unidade(s) · estoque 7 → 10', { exact: false }).waitFor()
+  const getStock = () => page.evaluate(async () => (await (await import('/src/services/productsService.js')).listProductsByUser('test-jn-only')).find(product => product.id === 'cancel-product').stockQuantity)
+  await page.evaluate(() => sessionStorage.setItem('fail-sale-deletion', '1'))
+  await confirmation.getByRole('button', { name: 'Confirmar exclusão', exact: true }).click()
+  await confirmation.getByRole('alert').waitFor()
+  assert.equal(await getStock(), 7)
+  await page.evaluate(() => sessionStorage.removeItem('fail-sale-deletion'))
+  await confirmation.getByRole('button', { name: 'Confirmar exclusão', exact: true }).evaluate(button => { button.click(); button.click() })
+  await page.getByText('Venda excluída das movimentações atuais.', { exact: false }).waitFor()
+  assert.equal(await getStock(), 10)
+  assert.equal(await page.locator('.sales-list-placeholder .sales-table tbody tr').count(), 0)
+  assert.equal(await page.evaluate(() => window.__mockWrites.length), 6, 'Uma única gravação por documento, mesmo com clique duplo')
+  await page.getByRole('combobox', { name: 'Situação', exact: true }).selectOption({ label: 'Excluídas (histórico)' })
+  await page.getByRole('button', { name: 'Ver detalhes', exact: true }).click()
+  assert.equal(await page.getByRole('dialog', { name: 'Detalhes da venda', exact: true }).getByRole('button', { name: 'Excluir venda', exact: true }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'Receber pagamento', exact: true }).isDisabled(), true)
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click()
+  await page.getByRole('button', { name: 'Financeiro', exact: true }).click()
+  await financialMetric('Falta receber', '0,00')
+  await financialMetric('Recebido', '0,00')
+  await page.locator('.financial-accounts-table').getByText('Cancelada por exclusão de venda', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Clientes', exact: true }).click()
+  await page.locator('.clients-table tbody tr').filter({ hasText: 'Cliente de teste' }).getByRole('button', { name: 'Ver', exact: true }).click()
+  await page.locator('.client-balance strong').filter({ hasText: '0,00' }).waitFor()
+  assert.deepEqual(pageErrors, [])
+  console.log('OK: exclusão cancelável na lista/ficha, pagamento histórico, saldo zerado, falha atômica e clique duplo seguro; recibo desktop/390/320 retorna mantendo filtros e não imprime controles. Só dados simulados.')
+}
+
 try {
+  await testSaleDeletionAndReceipt()
+  if (process.env.JN_SALE_DELETION_ONLY !== '1') {
   await open('/clientes')
   await page.locator('.clients-table').getByText('Cliente antigo', { exact: true }).waitFor()
   assert.equal(await page.locator('.clients-table tbody tr').count(), 2)
@@ -546,12 +622,16 @@ try {
   assert.equal(await page.evaluate(async () => (await (await import('/src/services/productsService.js')).listProductsByUser('test-jn-only')).find(product => product.id === 'product').stockQuantity), 7)
   await page.locator('.sales-list-placeholder .sales-table tbody tr').first().getByRole('button', { name: 'Ver detalhes', exact: true }).click()
   await page.locator('.sale-payments').getByText('R$ 50,00', { exact: true }).waitFor()
-  const receiptPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Recibo', exact: true }).click()
-  const receipt = await receiptPromise
-  await receipt.waitForLoadState('domcontentloaded')
+  const receipt = page.frameLocator('iframe[title="Documento do recibo"]')
+  await receipt.locator('.receipt').waitFor()
   assert.match((await receipt.locator('body').innerText()).replace(/\u00a0/g, ' '), /300,00/)
-  await receipt.close()
+  assert.equal(await receipt.getByRole('button').count(), 0, 'Controles fora da área do recibo e da impressão')
+  await page.emulateMedia({ media: 'print' })
+  assert.equal(await page.locator('.sale-receipt-toolbar').isVisible(), false)
+  await page.emulateMedia({ media: 'screen' })
+  await page.getByRole('dialog', { name: 'Recibo da venda', exact: true }).getByRole('button', { name: 'Voltar', exact: true }).click()
+  assert.equal(await page.getByRole('heading', { name: 'Detalhes da venda', exact: true }).isVisible(), true)
   await page.getByRole('button', { name: 'Receber pagamento', exact: true }).click()
   await page.locator('#receiveAmount').fill('20')
   await page.locator('#receiveDate').fill('2026-10-27')
@@ -723,12 +803,11 @@ try {
   await page.getByRole('button', { name: 'Abrir venda e recibo', exact: true }).click()
   await page.waitForURL('**/vendas')
   await page.getByRole('heading', { name: 'Detalhes da venda', exact: true }).waitFor()
-  const financialReceiptPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Recibo', exact: true }).click()
-  const financialReceipt = await financialReceiptPromise
-  await financialReceipt.waitForLoadState('domcontentloaded')
+  const financialReceipt = page.frameLocator('iframe[title="Documento do recibo"]')
+  await financialReceipt.locator('.receipt').waitFor()
   assert.match((await financialReceipt.locator('body').innerText()).replace(/\u00a0/g, ' '), /100,00/)
-  await financialReceipt.close()
+  await page.getByRole('dialog', { name: 'Recibo da venda', exact: true }).getByRole('button', { name: 'Voltar', exact: true }).click()
 
   await open('/produtos')
   await page.evaluate(() => {
@@ -982,6 +1061,7 @@ try {
   assert.equal(await page.evaluate(() => window.__writes), 0)
   assert.deepEqual(pageErrors, [])
   console.log('OK: quatro telas em desktop/mobile, leituras sem exclusão por data, filtros, contas órfãs, totais sem duplicação, atualização em tempo real e falha de permissão sem zero falso. Nenhuma gravação ou rede externa permitida.')
+  }
 } finally {
   await context.close()
   await browser.close()

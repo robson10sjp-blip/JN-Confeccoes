@@ -1,6 +1,5 @@
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -15,6 +14,8 @@ import {
 import { db } from '../firebase/config'
 import { buildSalesSummary, recordNumber, sortRecordsByDate, toDateKey } from '../utils/recordFilters'
 import { isRestartClosed } from '../utils/systemRestart'
+import { executeSaleDeletionByUser } from './saleDeletionService'
+import { isSaleCancelled } from '../utils/saleDeletion'
 
 const PAYMENT_CASH = 'À Vista'
 const PAYMENT_INSTALLMENTS = 'Prazo'
@@ -489,6 +490,7 @@ export async function updateSaleByUser(uid, saleId, payload) {
     }
 
     const previousSale = saleSnapshot.data()
+    if (isSaleCancelled(previousSale)) throw new Error('Esta venda foi excluída e permanece somente para consulta do histórico.')
     if (isRestartClosed(previousSale)) throw new Error('Esta venda foi encerrada para reinício. O histórico não pode ser editado ou recebido como venda atual.')
     const previousItems = previousSale.items || []
     const paidAmount = recordNumber(previousSale.paidAmount ?? previousSale.amountPaid)
@@ -573,25 +575,8 @@ export async function updateSaleByUser(uid, saleId, payload) {
   })
 }
 
-export async function deleteSaleByUser(uid, saleId) {
-  ensureFirestoreReady()
-  ensureUser(uid)
-
-  if (!saleId || typeof saleId !== 'string' || !saleId.trim()) {
-    throw Object.assign(new Error('Venda sem ID válido para exclusão.'), {
-      code: 'sales/invalid-sale-id',
-    })
-  }
-
-  const normalizedSaleId = saleId.trim()
-  const saleRef = doc(db, 'users', uid, 'sales', normalizedSaleId)
-  const saleSnapshot = await getDoc(saleRef)
-
-  if (!saleSnapshot.exists()) {
-    throw Object.assign(new Error('Venda não encontrada.'), { code: 'sales/not-found' })
-  }
-
-  await deleteDoc(saleRef)
+export async function deleteSaleByUser(uid, saleId, reviewed) {
+  return executeSaleDeletionByUser(uid, saleId, reviewed)
 }
 
 export async function registerSalePaymentByUser(uid, saleId, paymentAmount, paymentDate, requestId) {
@@ -632,6 +617,7 @@ export async function registerSalePaymentByUser(uid, saleId, paymentAmount, paym
     }
 
     const saleData = saleSnapshot.data()
+    if (isSaleCancelled(saleData)) throw new Error('Esta venda foi excluída e não aceita recebimentos.')
     if (isRestartClosed(saleData)) throw new Error('Esta venda foi encerrada para reinício e não aceita novos recebimentos.')
     const existingPaymentsHistory = Array.isArray(saleData.payments) ? saleData.payments : []
     if (existingPaymentsHistory.some(payment => payment.paymentId === operationId)) return
