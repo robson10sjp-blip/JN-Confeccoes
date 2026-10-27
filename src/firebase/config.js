@@ -16,9 +16,6 @@ const requiredFirebaseEnvKeys = [
   'apiKey',
   'authDomain',
   'projectId',
-  'storageBucket',
-  'messagingSenderId',
-  'appId',
 ]
 
 const missingFirebaseEnvKeys = requiredFirebaseEnvKeys.filter((key) => !firebaseConfig[key])
@@ -27,17 +24,22 @@ const hasFirebaseConfig = missingFirebaseEnvKeys.length === 0
 let app = null
 let auth = null
 let db = null
+let firebaseInitializationError = null
 
 if (hasFirebaseConfig) {
   try {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig)
+    if (app.options.projectId !== firebaseConfig.projectId) {
+      throw Object.assign(new Error('O aplicativo Firebase inicializado pertence a outro projeto.'), { code: 'auth/firebase-project-mismatch' })
+    }
     auth = getAuth(app)
     db = getFirestore(app)
   } catch (error) {
+    firebaseInitializationError = error
     console.error('Falha ao inicializar Firebase:', error)
   }
 } else {
   console.error('Configuração do Firebase incompleta. Variáveis ausentes:', missingFirebaseEnvKeys)
 }
 
-export { app, auth, db, hasFirebaseConfig, missingFirebaseEnvKeys }
+export { app, auth, db, hasFirebaseConfig, missingFirebaseEnvKeys, firebaseInitializationError }

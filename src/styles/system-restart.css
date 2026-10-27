@@ -1,0 +1,51 @@
+.restart-control { margin-bottom: 22px; color: #1d2925; font-size: 1rem; line-height: 1.5; }
+.restart-entry, .restart-secondary, .restart-confirm { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 50px; border: 1px solid #9a7b3d; border-radius: 8px; padding: 11px 16px; background: #fffaf0; color: #654b1c; font: inherit; font-weight: 700; cursor: pointer; }
+.restart-secondary { background: #ffffff; color: #244b37; border-color: #aebcb4; }
+.restart-confirm { background: #176345; color: #ffffff; border-color: #176345; }
+.restart-entry:hover { background: #fff1d2; }
+.restart-secondary:hover { background: #e7f0eb; }
+.restart-confirm:hover { background: #104c34; }
+.restart-control svg { flex-shrink: 0; }
+.restart-control button:disabled { opacity: 0.6; cursor: not-allowed; }
+.restart-control button:focus-visible, .restart-control input:focus-visible, .restart-control summary:focus-visible { outline: 3px solid #397758; outline-offset: 3px; }
+.restart-overlay { position: fixed; inset: 0; background: rgba(16, 29, 22, 0.65); z-index: 60; display: grid; place-items: center; padding: 16px; }
+.restart-dialog { width: min(100%, 920px); max-height: calc(100dvh - 32px); overflow: auto; overscroll-behavior: contain; min-width: 0; background: #ffffff; border: 1px solid #d7dfdb; border-radius: 8px; padding: 24px; }
+.restart-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d7dfdb; padding-bottom: 16px; margin-bottom: 20px; }
+.restart-dialog h2 { margin: 0; font-size: 1.45rem; line-height: 1.3; }
+.restart-dialog h3 { font-size: 1.1rem; margin: 22px 0 12px; }
+.restart-dialog p, .restart-dialog li { overflow-wrap: anywhere; }
+.restart-dialog > footer { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid #d7dfdb; padding-top: 18px; margin-top: 22px; }
+.restart-status, .restart-error, .restart-success { display: flex; align-items: flex-start; gap: 10px; }
+.restart-error { padding: 14px; background: #fff3f0; border-left: 4px solid #a13d31; color: #702a22; }
+.restart-success { color: #176345; font-weight: 700; }
+.restart-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding-block: 10px; margin: 0; }
+.restart-counts dt { font-weight: 600; color: #52615b; }
+.restart-counts dd { margin: 4px 0 0; font-size: 1.8rem; font-variant-numeric: tabular-nums; }
+.restart-backup { border-block: 1px solid #d7dfdb; padding-bottom: 16px; margin-top: 16px; }
+.restart-backup label { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; font-weight: 600; cursor: pointer; }
+.restart-backup input { flex-shrink: 0; width: 22px; height: 22px; accent-color: #176345; }
+.restart-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.restart-table th, .restart-table td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #d7dfdb; overflow-wrap: anywhere; }
+.restart-table th { background: #edf2ef; font-size: 0.9rem; }
+.restart-table th:first-child { width: 45%; }
+.restart-review summary { min-height: 48px; padding-block: 12px; cursor: pointer; font-weight: 700; }
+.restart-review { margin-top: 16px; }
+.restart-review ul { padding-left: 24px; }
+.restart-review li { margin-block: 10px; }
+.restart-note { padding: 12px 14px; border-left: 3px solid #ac7625; background: #fff8e9; color: #6b501e; }
+@media (max-width: 760px) {
+  .restart-entry { width: 100%; text-align: left; }
+  .restart-dialog { padding: 16px; }
+  .restart-dialog h2 { font-size: 1.2rem; }
+  .restart-dialog > header { gap: 10px; }
+  .restart-dialog > header { flex-wrap: wrap; }
+  .restart-dialog > header h2 { flex: 1 1 100%; }
+  .restart-dialog > header button { padding: 8px; }
+  .restart-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .restart-dialog > footer button { flex: 1 1 180px; }
+  .restart-table, .restart-table tbody, .restart-table tr, .restart-table td { display: block; width: 100%; }
+  .restart-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .restart-table tr { padding-block: 10px; border-bottom: 1px solid #d7dfdb; }
+  .restart-table td { border: 0; padding-block: 5px; }
+  .restart-table td::before { content: attr(data-label); display: block; font-size: 0.85rem; font-weight: 600; color: #52615b; }
+}

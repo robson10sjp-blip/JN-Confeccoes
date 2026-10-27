@@ -2,6 +2,7 @@ import { useState } from 'react'
 import BrandLogo from '../components/BrandLogo'
 import SidebarNav from '../components/dashboard/SidebarNav'
 import TopBar from '../components/dashboard/TopBar'
+import SystemRestartControl from '../components/SystemRestartControl'
 import '../styles/dashboard-layout.css'
 
 function DashboardLayout({ children, sidebarItems, activeItem, onSelectItem, userName, onLogout }) {
@@ -28,7 +29,7 @@ function DashboardLayout({ children, sidebarItems, activeItem, onSelectItem, use
           onToggleMenu={() => setMenuOpen((currentState) => !currentState)}
         />
 
-        <main className="dashboard-layout-main">{children}</main>
+        <main className="dashboard-layout-main"><SystemRestartControl />{children}</main>
       </div>
     </div>
   )

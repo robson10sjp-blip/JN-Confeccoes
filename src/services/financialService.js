@@ -1,7 +1,13 @@
-import { addDoc, collection, getDocs, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, getDocs, getDocsFromServer, onSnapshot, query, runTransaction, serverTimestamp, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { listClientsByUser } from './clientsService'
-import { getSalesSummaryByUser, listSalesByUser, registerSalePaymentByUser } from './salesService'
+import { listSalesByUser } from './salesService'
+import { buildSalesSummary, computeReceivableBalance, computeReceivableStatus, sortRecordsByDate, toDateKey } from '../utils/recordFilters'
+import { financialAccountValues } from '../utils/financialRecords'
+import { recordNumber } from '../utils/recordFilters'
+import { isRestartClosed } from '../utils/systemRestart'
+
+export { computeReceivableBalance, computeReceivableStatus }
 
 function ensureFirestoreReady() {
   if (!db) {
@@ -41,60 +47,36 @@ export function getTodayDateString() {
   return formatLocalDate(new Date())
 }
 
-export function computeReceivableStatus(receivable, todayDate = getTodayDateString()) {
-  const totalAmount = parseNumber(receivable.amount)
-  const receivedAmount = parseNumber(receivable.receivedAmount)
-  const balance = Math.max(0, totalAmount - receivedAmount)
-
-  if (balance <= 0) {
-    return 'Pago'
-  }
-
-  if (receivable.dueDate && receivable.dueDate < todayDate) {
-    return 'Atrasado'
-  }
-
-  if (receivedAmount > 0) {
-    return 'Parcial'
-  }
-
-  return 'Pendente'
-}
-
-export function computeReceivableBalance(receivable) {
-  return Math.max(0, parseNumber(receivable.amount) - parseNumber(receivable.receivedAmount))
-}
-
 export async function listReceivablesByUser(uid) {
-  const receivablesQuery = query(getReceivablesCollectionRef(uid), orderBy('dueDate', 'asc'))
+  const receivablesQuery = getReceivablesCollectionRef(uid)
   const snapshot = await getDocs(receivablesQuery)
 
-  return snapshot.docs.map((entryDoc) => ({
-    id: entryDoc.id,
+  return sortRecordsByDate(snapshot.docs.map((entryDoc) => ({
     ...entryDoc.data(),
-  }))
+    id: entryDoc.id,
+  })), 'dueDate', 'asc')
 }
 
 export async function listFinancialPaymentsByUser(uid) {
-  const paymentsQuery = query(getPaymentsHistoryCollectionRef(uid), orderBy('paymentDate', 'desc'))
+  const paymentsQuery = getPaymentsHistoryCollectionRef(uid)
   const snapshot = await getDocs(paymentsQuery)
 
-  return snapshot.docs.map((entryDoc) => ({
-    id: entryDoc.id,
+  return sortRecordsByDate(snapshot.docs.map((entryDoc) => ({
     ...entryDoc.data(),
-  }))
+    id: entryDoc.id,
+  })), 'paymentDate')
 }
 
 export function subscribeReceivablesByUser(uid, onData, onError) {
-  const receivablesQuery = query(getReceivablesCollectionRef(uid), orderBy('dueDate', 'asc'))
+  const receivablesQuery = getReceivablesCollectionRef(uid)
 
   return onSnapshot(
     receivablesQuery,
     (snapshot) => {
-      const receivables = snapshot.docs.map((entryDoc) => ({
-        id: entryDoc.id,
+      const receivables = sortRecordsByDate(snapshot.docs.map((entryDoc) => ({
         ...entryDoc.data(),
-      }))
+        id: entryDoc.id,
+      })), 'dueDate', 'asc')
 
       onData(receivables)
     },
@@ -103,15 +85,15 @@ export function subscribeReceivablesByUser(uid, onData, onError) {
 }
 
 export function subscribeFinancialPaymentsByUser(uid, onData, onError) {
-  const paymentsQuery = query(getPaymentsHistoryCollectionRef(uid), orderBy('paymentDate', 'desc'))
+  const paymentsQuery = getPaymentsHistoryCollectionRef(uid)
 
   return onSnapshot(
     paymentsQuery,
     (snapshot) => {
-      const payments = snapshot.docs.map((entryDoc) => ({
-        id: entryDoc.id,
+      const payments = sortRecordsByDate(snapshot.docs.map((entryDoc) => ({
         ...entryDoc.data(),
-      }))
+        id: entryDoc.id,
+      })), 'paymentDate')
 
       onData(payments)
     },
@@ -163,7 +145,8 @@ function dateRangeForYear() {
 }
 
 function isDateWithinRange(dateValue, range) {
-  return dateValue >= range.from && dateValue <= range.to
+  const date = toDateKey(dateValue)
+  return Boolean(date && date >= range.from && date <= range.to)
 }
 
 function computeReportFromData(range, receivables, payments, sales) {
@@ -179,7 +162,7 @@ function computeReportFromData(range, receivables, payments, sales) {
     .filter((receivable) => receivable.dueDate && isDateWithinRange(receivable.dueDate, range))
     .reduce((acc, receivable) => {
       const status = computeReceivableStatus(receivable)
-      if (status === 'Pago') {
+      if (status === 'Pago' || status === 'Não informado') {
         return acc
       }
       return acc + computeReceivableBalance(receivable)
@@ -210,7 +193,7 @@ export function buildFinancialIndicators(receivables, payments, salesSummary) {
 
   const totalToReceive = receivables.reduce((acc, receivable) => {
     const status = computeReceivableStatus(receivable)
-    if (status === 'Pago') {
+    if (status === 'Pago' || status === 'Não informado') {
       return acc
     }
     return acc + computeReceivableBalance(receivable)
@@ -242,7 +225,7 @@ export function buildFinancialIndicators(receivables, payments, salesSummary) {
 
   const debtors = new Set(
     receivables
-      .filter((receivable) => computeReceivableStatus(receivable) !== 'Pago')
+      .filter((receivable) => computeReceivableBalance(receivable) > 0)
       .map((receivable) => receivable.clientId)
       .filter(Boolean),
   )
@@ -273,12 +256,12 @@ export function buildPriorities(receivables, clientsById) {
 
   return receivables
     .map((receivable) => {
-      const status = computeReceivableStatus(receivable, today)
-      if (status === 'Pago' || !receivable.dueDate || receivable.dueDate > today) {
+      const dueDateKey = toDateKey(receivable.dueDate)
+      if (!(computeReceivableBalance(receivable) > 0) || !dueDateKey || dueDateKey > today) {
         return null
       }
 
-      const dueDate = new Date(`${receivable.dueDate}T00:00:00`)
+      const dueDate = new Date(`${dueDateKey}T00:00:00`)
       const todayDate = new Date(`${today}T00:00:00`)
       const diffDays = Math.floor((todayDate - dueDate) / (1000 * 60 * 60 * 24))
       const client = clientsById[receivable.clientId] || {}
@@ -290,7 +273,7 @@ export function buildPriorities(receivables, clientsById) {
         phone: client.phone || '-',
         amount: computeReceivableBalance(receivable),
         daysLate: Math.max(0, diffDays),
-        dueDate: receivable.dueDate,
+        dueDate: dueDateKey,
       }
     })
     .filter(Boolean)
@@ -299,12 +282,11 @@ export function buildPriorities(receivables, clientsById) {
 
 export async function loadFinancialModuleData(uid) {
   ensureUser(uid)
-  const [receivables, payments, sales, clients, salesSummary] = await Promise.all([
+  const [receivables, payments, sales, clients] = await Promise.all([
     listReceivablesByUser(uid),
     listFinancialPaymentsByUser(uid),
     listSalesByUser(uid),
     listClientsByUser(uid),
-    getSalesSummaryByUser(uid),
   ])
 
   const clientsById = clients.reduce((acc, client) => {
@@ -317,39 +299,76 @@ export async function loadFinancialModuleData(uid) {
     payments,
     sales,
     clientsById,
-    salesSummary,
+    salesSummary: buildSalesSummary(sales),
   }
 }
 
 export async function registerFinancialPaymentByUser(uid, receivable, payload) {
+  ensureFirestoreReady()
   ensureUser(uid)
-  const amount = parseNumber(payload.amount)
-  const balance = computeReceivableBalance(receivable)
+  if (!receivable?.id) throw new Error('Conta não identificada.')
+  const amount = Number(payload.amount)
 
-  if (amount <= 0) {
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(Math.round(amount * 100)) || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) {
     throw Object.assign(new Error('Não é permitido receber valor negativo ou zero.'), {
       code: 'financial/invalid-amount',
     })
   }
 
-  if (amount > balance) {
-    throw Object.assign(new Error('Não é permitido receber acima do saldo.'), {
-      code: 'financial/amount-over-balance',
-    })
-  }
-
-  await registerSalePaymentByUser(uid, receivable.saleId, amount, payload.paymentDate)
-
-  await addDoc(getPaymentsHistoryCollectionRef(uid), {
-    receivableId: receivable.id,
-    saleId: receivable.saleId,
-    clientId: receivable.clientId,
-    clientName: receivable.clientName || '',
-    amount,
-    paymentDate: payload.paymentDate,
-    paymentMethod: payload.paymentMethod || '',
-    observation: payload.observation || '',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  if (toDateKey(payload.paymentDate) !== payload.paymentDate || !payload.paymentDate) throw Object.assign(new Error('Informe uma data de pagamento válida.'), { code: 'financial/invalid-date' })
+  const accountRef = doc(getReceivablesCollectionRef(uid), receivable.id)
+  const paymentRef = payload.requestId ? doc(getPaymentsHistoryCollectionRef(uid), payload.requestId) : doc(getPaymentsHistoryCollectionRef(uid))
+  const saleRef = receivable.saleId ? doc(db, 'users', uid, 'sales', receivable.saleId) : null
+  const accountGroup = saleRef ? await getDocsFromServer(query(getReceivablesCollectionRef(uid), where('saleId', '==', receivable.saleId))) : null
+  await runTransaction(db, async transaction => {
+    const previousPayment = await transaction.get(paymentRef)
+    if (previousPayment.exists()) {
+      if (previousPayment.data().receivableId !== receivable.id) throw new Error('Identificação de recebimento já utilizada em outra conta. Reabra a conta para conferir.')
+      return
+    }
+    const accountSnapshot = await transaction.get(accountRef)
+    if (!accountSnapshot.exists()) throw new Error('A conta não foi localizada. Nenhum pagamento foi registrado.')
+    const account = accountSnapshot.data()
+    if (isRestartClosed(account)) throw new Error('Esta conta foi encerrada para reinício e não aceita novos pagamentos.')
+    if ((account.saleId || '') !== (receivable.saleId || '')) throw new Error('O vínculo da conta mudou. Reabra a conta antes de receber.')
+    const values = financialAccountValues(account)
+    if (values.balance === null) throw Object.assign(new Error('Os valores da conta precisam de revisão antes do recebimento.'), { code: 'financial/review-required' })
+    if (recordNumber(receivable.receivedAmount) !== values.paid) throw Object.assign(new Error('A conta foi atualizada desde a conferência. Reabra o recebimento para confirmar o saldo atual.'), { code: 'financial/account-changed' })
+    if (amount > values.balance) throw Object.assign(new Error('O valor recebido não pode ultrapassar o saldo desta conta.'), { code: 'financial/amount-over-balance' })
+    const saleSnapshot = saleRef ? await transaction.get(saleRef) : null
+    let saleUpdate = null
+    if (saleSnapshot?.exists()) {
+      const sale = saleSnapshot.data()
+      if (isRestartClosed(sale)) throw new Error('A venda desta conta foi encerrada para reinício. Confira o vínculo antes de receber.')
+      const total = recordNumber(sale.totalAmount)
+      const paid = recordNumber(sale.paidAmount ?? sale.amountPaid)
+      if (total === null || paid === null || paid < 0 || paid > total || account.clientId && sale.clientId && account.clientId !== sale.clientId) throw Object.assign(new Error('A conta e a venda precisam de conferência antes de receber.'), { code: 'financial/review-required' })
+      if (sale.paidAmount !== undefined && sale.amountPaid !== undefined && recordNumber(sale.paidAmount) !== recordNumber(sale.amountPaid) || sale.remainingAmount !== undefined && Math.abs(Number(sale.remainingAmount) - (total - paid)) > 0.01) throw Object.assign(new Error('Os valores pagos e o saldo da venda não conferem. Revise antes de receber.'), { code: 'financial/review-required' })
+      const related = []
+      for (const entry of accountGroup.docs) {
+        const snapshot = await transaction.get(entry.ref)
+        if (!snapshot.exists()) throw new Error('As parcelas mudaram. Reabra a conta para conferir.')
+        const data = snapshot.data()
+        const checked = financialAccountValues(data)
+        if (checked.balance === null || data.saleId !== receivable.saleId || data.clientId && sale.clientId && data.clientId !== sale.clientId) throw Object.assign(new Error('Há parcelas com valores ou vínculos que precisam de revisão.'), { code: 'financial/review-required' })
+        related.push({ id: entry.id, ...checked })
+      }
+      if (!related.some(entry => entry.id === receivable.id) || Math.abs(related.reduce((sum, entry) => sum + entry.amount, 0) - total) > 0.01 || Math.abs(related.reduce((sum, entry) => sum + entry.paid, 0) - paid) > 0.01 || paid + amount > total) throw Object.assign(new Error('As parcelas e a venda não conferem. Nenhum dado foi alterado; revise os valores antes de receber.'), { code: 'financial/review-required' })
+      const nextPaid = Math.round((paid + amount) * 100) / 100
+      saleUpdate = { paidAmount: nextPaid, amountPaid: nextPaid, remainingAmount: Math.round((total - nextPaid) * 100) / 100, status: nextPaid >= total ? 'Pago' : 'Parcial', payments: [...(Array.isArray(sale.payments) ? sale.payments : []), { paymentId: paymentRef.id, receivableId: receivable.id, amount, paymentDate: payload.paymentDate, paymentMethod: payload.paymentMethod || '' }], lastPaymentDate: payload.paymentDate, updatedAt: serverTimestamp() }
+    }
+    const nextReceived = Math.round((values.paid + amount) * 100) / 100
+    transaction.update(accountRef, { receivedAmount: nextReceived, status: nextReceived >= values.amount ? 'Pago' : 'Parcial', paymentDate: payload.paymentDate, updatedAt: serverTimestamp() })
+    if (saleUpdate) transaction.update(saleRef, saleUpdate)
+    transaction.set(paymentRef, { receivableId: receivable.id, saleId: account.saleId || '', clientId: account.clientId || '', clientName: account.clientName || '', amount, paymentDate: payload.paymentDate, paymentMethod: payload.paymentMethod || '', observation: payload.observation || '', createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
   })
+  return paymentRef.id
+}
+
+export function subscribeFinancialSource(uid, source, onData, onError) {
+  ensureFirestoreReady()
+  ensureUser(uid)
+  const sources = { receivables: 'financeiroReceber', payments: 'financeiroRecebimentos', sales: 'sales', clients: 'clients' }
+  if (!Object.hasOwn(sources, source)) throw new Error('Fonte financeira inválida.')
+  return onSnapshot(collection(db, 'users', uid, sources[source]), { includeMetadataChanges: true }, snapshot => onData(snapshot.docs.map(entry => ({ ...entry.data(), id: entry.id })), !snapshot.metadata?.fromCache), onError)
 }

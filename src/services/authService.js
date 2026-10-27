@@ -6,12 +6,15 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth'
-import { auth, hasFirebaseConfig, missingFirebaseEnvKeys } from '../firebase/config'
+import { auth, hasFirebaseConfig, missingFirebaseEnvKeys, firebaseInitializationError } from '../firebase/config'
 
 function createFirebaseConfigError() {
+  if (firebaseInitializationError) {
+    return { code: firebaseInitializationError.code || 'auth/initialization-failed' }
+  }
   return {
     code: 'auth/not-configured',
-    message: `Firebase Authentication não configurado. Variáveis ausentes: ${missingFirebaseEnvKeys.join(', ')}`,
+    missingEnvKeys: missingFirebaseEnvKeys.map(key => `VITE_FIREBASE_${key.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase()}`),
   }
 }
 
