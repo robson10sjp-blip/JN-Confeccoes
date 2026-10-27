@@ -12,6 +12,7 @@ import { sidebarMenuItems } from '../constants/sidebarMenu'
 import { useAuth } from '../hooks/useAuth'
 import DashboardLayout from '../layouts/DashboardLayout'
 import receiptLogo from '../assets/logo.png'
+import SaleReceiptViewer from '../components/SaleReceiptViewer'
 import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import { prepareSaleDeletionByUser } from '../services/saleDeletionService'
 import { isSaleCancelled, SALE_CANCELLATION_LABEL } from '../utils/saleDeletion'
@@ -125,8 +126,6 @@ function SalesPage() {
   const deletionRequest = useRef(0)
   const [receiptHtml, setReceiptHtml] = useState('')
   const [loadingReceipt, setLoadingReceipt] = useState(false)
-  const receiptFrame = useRef(null)
-  const receiptDialog = useRef(null)
   const [submittingSale, setSubmittingSale] = useState(false)
   const [receivingSaleId, setReceivingSaleId] = useState('')
   const [filters, setFilters] = useState({
@@ -323,23 +322,6 @@ function SalesPage() {
       setErrorMessage(error?.code ? getFirebaseErrorMessage(error, 'Não foi possível excluir a venda') : error?.message || 'Não foi possível excluir a venda.')
     } finally { deletionRunning.current = false; setDeletingSale(false) }
   }
-
-  useEffect(() => {
-    if (!receiptHtml || !receiptDialog.current) return
-    const previousFocus = document.activeElement
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    receiptDialog.current.querySelector('button')?.focus()
-    const onKey = event => {
-      if (event.key === 'Escape') setReceiptHtml('')
-      if (event.key !== 'Tab') return
-      const elements = [...receiptDialog.current.querySelectorAll('button, iframe')]
-      if (event.shiftKey && document.activeElement === elements[0]) { event.preventDefault(); elements.at(-1)?.focus() }
-      if (!event.shiftKey && document.activeElement === elements.at(-1)) { event.preventDefault(); elements[0]?.focus() }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', onKey); if (previousFocus?.isConnected) previousFocus.focus() }
-  }, [receiptHtml])
 
   useEffect(() => {
     const saleId = location.state?.financialSaleId
@@ -1521,7 +1503,7 @@ function SalesPage() {
           {errorMessage ? <p className="sales-message error" role="alert">{errorMessage}</p> : null}<footer className="sale-form-actions"><button type="button" className="sales-secondary-button" onClick={() => setModalState({ type: '', saleId: '' })} disabled={deletingSale}>Cancelar</button><button type="button" className="sales-delete-button" onClick={confirmDeleteSale} disabled={deletingSale || deletion.status !== 'ready'}><Trash2 size={21} aria-hidden="true" />{deletingSale ? 'Excluindo…' : 'Confirmar exclusão'}</button></footer>
         </section></div> : null}
 
-        {receiptHtml ? <div className="sale-receipt-overlay" role="dialog" aria-modal="true" aria-label="Recibo da venda" ref={receiptDialog}><div className="sale-receipt-toolbar"><button type="button" className="sales-secondary-button" onClick={() => setReceiptHtml('')}><ArrowLeft size={22} aria-hidden="true" />Voltar</button><button type="button" className="sales-primary-button" onClick={() => { receiptFrame.current?.contentWindow?.focus(); receiptFrame.current?.contentWindow?.print() }}><Printer size={22} aria-hidden="true" />Imprimir recibo</button></div><iframe title="Documento do recibo" ref={receiptFrame} srcDoc={receiptHtml} sandbox="allow-same-origin allow-modals" /></div> : null}
+        {receiptHtml ? <SaleReceiptViewer html={receiptHtml} onClose={() => setReceiptHtml('')} /> : null}
 
         {modalState.type === 'receive' && currentSale ? (
           <div className="sale-modal-overlay" role="presentation">

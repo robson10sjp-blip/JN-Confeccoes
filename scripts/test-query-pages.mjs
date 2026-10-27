@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { chromium, devices, webkit } from 'playwright'
 
 const baseUrl = process.env.JN_TEST_URL || 'http://localhost:5173'
@@ -190,6 +191,66 @@ async function testSaleDeletionAndReceipt() {
     assert.equal(await receipt.locator('html').evaluate(element => element.scrollWidth <= element.clientWidth), true, 'Recibo legível sem transbordar a tela')
     assert.equal(await receipt.locator('td').evaluateAll(elements => elements.every(element => { const bounds = element.getBoundingClientRect(); return bounds.left >= 0 && bounds.right <= window.innerWidth })), true, 'Todas as colunas visíveis, sem corte pelo contêiner')
     await viewer.getByRole('button', { name: 'Imprimir recibo', exact: true }).waitFor()
+    await page.waitForFunction(() => {
+      const buttons = [...document.querySelectorAll('.sale-receipt-overlay button')]
+      return buttons.some(button => button.textContent.includes('Salvar imagem') && !button.disabled) || document.querySelector('.sale-receipt-overlay [role="alert"]')
+    })
+    assert.equal(await viewer.getByRole('alert').count(), 0, 'PNG gerado sem erro')
+    const saveImage = viewer.getByRole('button', { name: 'Salvar imagem', exact: true })
+    if (size.width === 1366 || size.width === 320) {
+      await page.evaluate(() => Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => false }))
+      const downloadPromise = page.waitForEvent('download')
+      await saveImage.click()
+      const download = await downloadPromise
+      assert.match(download.suggestedFilename(), /^recibo-jn-.*\.png$/)
+      const path = await download.path()
+      const png = await readFile(path)
+      assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+      assert.equal(png.readUInt32BE(16), 1588, 'Mesmo documento de 794 px em 2x, inclusive no celular')
+      assert.ok(png.readUInt32BE(20) > 1400 && png.readUInt32BE(20) <= 7500)
+      const pixels = await page.evaluate(async data => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${data}`
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const drawing = canvas.getContext('2d')
+        drawing.drawImage(image, 0, 0)
+        const pixels = drawing.getImageData(0, 0, canvas.width, canvas.height).data
+        let dark = 0
+        for (let index = 0; index < pixels.length; index += 4) if (pixels[index] < 100 && pixels[index + 1] < 100 && pixels[index + 2] < 100) dark++
+        return { dark, count: pixels.length / 4 }
+      }, png.toString('base64'))
+      assert.ok(pixels.dark > 5000 && pixels.dark < pixels.count / 2, 'Imagem contém texto/logo, não é branca nem preta')
+      if (process.env.JN_SCREENSHOT_DIR) await download.saveAs(`${process.env.JN_SCREENSHOT_DIR}/jn-export-${process.env.JN_TEST_BROWSER || 'chromium'}-${size.width}.png`)
+      await viewer.getByText('Imagem PNG baixada.', { exact: false }).waitFor()
+      await viewer.getByText('WhatsApp', { exact: false }).waitFor()
+    } else {
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, 'canShare', { configurable: true, value: ({ files }) => files?.[0]?.type === 'image/png' })
+        Object.defineProperty(navigator, 'share', { configurable: true, value: payload => {
+          window.__receiptShare = { keys: Object.keys(payload), type: payload.files[0].type, name: payload.files[0].name, size: payload.files[0].size, activated: navigator.userActivation?.isActive }
+          return Promise.resolve()
+        } })
+      })
+      await saveImage.click()
+      await viewer.getByText('Imagem enviada para o aplicativo escolhido.', { exact: true }).waitFor()
+      const shared = await page.evaluate(() => window.__receiptShare)
+      assert.deepEqual(shared.keys, ['files'], 'Nenhum endereço, texto ou link enviado junto da imagem')
+      assert.equal(shared.type, 'image/png')
+      assert.equal(shared.activated, true, 'Compartilhamento iniciado durante o toque, sem await que perca ativação')
+      assert.ok(shared.size > 5000)
+      await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: () => Promise.reject(Object.assign(new Error('Cancelamento simulado'), { name: 'AbortError' })) }))
+      await saveImage.click()
+      await viewer.getByText('Compartilhamento cancelado.', { exact: false }).waitFor()
+      await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: () => Promise.reject(Object.assign(new Error('Falha simulada'), { name: 'NotAllowedError' })) }))
+      await saveImage.click()
+      await viewer.getByText('Não foi possível compartilhar neste navegador.', { exact: false }).waitFor()
+      const fallbackDownload = page.waitForEvent('download')
+      await viewer.getByRole('button', { name: 'Baixar imagem', exact: true }).click()
+      assert.match((await fallbackDownload).suggestedFilename(), /\.png$/)
+    }
     await page.emulateMedia({ media: 'print' })
     assert.equal(await page.locator('.sale-receipt-toolbar').isVisible(), false)
     await page.emulateMedia({ media: 'screen' })
@@ -200,6 +261,19 @@ async function testSaleDeletionAndReceipt() {
     assert.equal(await page.getByRole('combobox', { name: 'Situação', exact: true }).inputValue(), 'Parcialmente paga')
   }
   await page.setViewportSize({ width: 1366, height: 900 })
+  assert.equal(await page.evaluate(() => window.__writes), 0, 'Salvar/compartilhar recibo nunca grava venda, pagamento ou estoque')
+  await page.evaluate(() => {
+    window.__receiptOriginalToBlob = HTMLCanvasElement.prototype.toBlob
+    HTMLCanvasElement.prototype.toBlob = callback => callback(null)
+  })
+  await page.getByRole('button', { name: 'Recibo', exact: true }).click()
+  const retryViewer = page.getByRole('dialog', { name: 'Recibo da venda', exact: true })
+  await retryViewer.getByRole('alert').waitFor()
+  assert.equal(await retryViewer.getByRole('button', { name: 'Salvar imagem', exact: true }).isDisabled(), true)
+  await page.evaluate(() => { HTMLCanvasElement.prototype.toBlob = window.__receiptOriginalToBlob })
+  await retryViewer.getByRole('button', { name: 'Tentar gerar imagem novamente', exact: true }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('.sale-receipt-overlay button')].some(button => button.textContent.includes('Salvar imagem') && !button.disabled))
+  await retryViewer.getByRole('button', { name: 'Voltar', exact: true }).click()
   await page.getByRole('dialog', { name: 'Detalhes da venda', exact: true }).getByRole('button', { name: 'Excluir venda', exact: true }).click()
   await confirmation.getByText('3 unidade(s) · estoque 7 → 10', { exact: false }).waitFor()
   const getStock = () => page.evaluate(async () => (await (await import('/src/services/productsService.js')).listProductsByUser('test-jn-only')).find(product => product.id === 'cancel-product').stockQuantity)
@@ -226,7 +300,7 @@ async function testSaleDeletionAndReceipt() {
   await page.locator('.clients-table tbody tr').filter({ hasText: 'Cliente de teste' }).getByRole('button', { name: 'Ver', exact: true }).click()
   await page.locator('.client-balance strong').filter({ hasText: '0,00' }).waitFor()
   assert.deepEqual(pageErrors, [])
-  console.log('OK: exclusão cancelável na lista/ficha, pagamento histórico, saldo zerado, falha atômica e clique duplo seguro; recibo desktop/390/320 retorna mantendo filtros e não imprime controles. Só dados simulados.')
+  console.log('OK: exclusão e recibo sem alteração real; PNG 1588 px com texto/logo, download desktop/320, compartilhamento de arquivo sem URL durante o toque, cancelamento/falha com alternativa; retorno/filtros e PDF preservados em 1366/390/320.')
 }
 
 try {

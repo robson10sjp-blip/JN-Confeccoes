@@ -208,6 +208,32 @@ erro/retry, filtros, historico, PDF, recibo e notebook/celular).
 - Devolucao exige prova de baixa ainda valida para todos os produtos da venda (`stockDebitProof` e `stockMovementId`), sem `stockReturn.completed` nem devolucao anterior registrada no usuario. Venda antiga sem prova fica em conferencia; nenhuma quantidade e adivinhada. Cancelamento/vinculos/devolucao usam uma unica transacao; repeticao reconhece o marcador e nao incrementa estoque novamente. Mudancas na venda, vinculos, estoque ou estado do reinicio exigem reabrir a confirmacao. Limite de 400 documentos afetados, sem gravacao parcial.
 - Transacoes de editar/receber recusam registros cancelados. A leitura de vinculos antecede a transacao e os documentos capturados sao reconferidos nela; pagamentos concorrentes pelos servicos atuais disputam os mesmos documentos e sao rejeitados ou exigem nova conferencia. Escritas externas, clientes antigos ou alteracoes manuais fora desses servicos nao tem garantia global de ausencia de novos vinculos; evite outras abas durante a exclusao. Nao foram abertas regras nem instalado backend novo.
 - Recibo abre dentro da mesma tela, com **Voltar** e **Imprimir recibo** fora do documento. Voltar preserva ficha, pesquisa e filtros, sem depender de pop-up ou `window.close()` no iPhone. Impressao/PDF usam somente o documento no iframe, sem controles; no celular, os campos da tabela ficam empilhados apenas na tela, mantendo o modelo de impressao. Regras/configuracoes Firebase e publicacao nao foram alteradas nesta tarefa; estas mudancas precisam de nova publicacao autorizada para aparecer no site.
+
+#### Recibo como imagem
+
+**Salvar imagem** e a acao principal do recibo. A imagem PNG captura apenas
+`.receipt`, em 794 px a 2x (1588 px), com fontes e logo carregadas, fundo branco
+e o mesmo modelo completo de impressao, inclusive no celular. Nao fotografa a
+tela: URL, menus, mensagens e botoes ficam fora do arquivo. O pacote html2canvas
+e carregado sob demanda; a imagem e preparada em memoria, sem upload ou gravacao
+no Firebase. Recibos muito longos sao recusados com orientacao para usar PDF,
+em vez de gerar imagem cortada ou ilegivel.
+
+Quando Web Share aceita arquivos, o toque envia somente o PNG (`files`, sem
+`url`/`text`) ao compartilhamento do aparelho. A preparacao antecipada evita
+perder a ativacao do toque no Safari. Cancelamento nao dispara download automatico;
+falha oferece **Baixar imagem**. Sem compartilhamento de arquivos, baixa o PNG
+e informa que ele pode ser enviado pelo WhatsApp. **Voltar** preserva os filtros;
+**Imprimir recibo** continua disponivel para papel/PDF.
+
+Teste focado: `JN_SALE_DELETION_ONLY=1 node scripts/test-query-pages.mjs`, com
+Vite local ativo. Usa apenas dados sinteticos e rede externa bloqueada. Verifica
+PNG real (assinatura, resolucao e pixels de texto/logo), notebook/390/320 px,
+download, compartilhamento simulado sem URL durante o toque, cancelamento/falha,
+geracao com erro e nova tentativa, controles fora da imagem/impressao, valores
+originais e nenhuma gravacao durante o recibo. Compartilhamento nativo/WhatsApp e
+Safari em iPhone fisico nao foram testados. A tentativa de executar WebKit com
+perfil iPhone foi bloqueada pelas bibliotecas do conteiner; nao e um teste aprovado.
 - Recuperacao de dados reais exige uma sessao autorizada ou exportacao somente leitura do mesmo UID (sales, financeiroReceber, financeiroRecebimentos, clients e IDs de produtos). Conferir IDs exatos e backup; contas sem itens/data de venda confiavel nao podem ser reconstruidas como vendas apenas por nome ou valor.
 
 Teste focado seguro: `node scripts/test-sale-deletion.mjs` (SDK inteiramente
